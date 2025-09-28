@@ -1,49 +1,51 @@
 #!/usr/bin/env python
+"""Telegram бот для мониторинга уведомлений с платформы 21-school"""
 
-import os
+import asyncio
 import json
 import logging
-import asyncio
+import os
+import sys
 import pickle
 from datetime import datetime, timedelta
-from typing import Dict, List, Set, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
 from enum import Enum
-
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.common.exceptions import TimeoutException, WebDriverException
-from webdriver_manager.chrome import ChromeDriverManager
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 
 import requests
-from telegram import Update, Bot, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler, filters,
-    ContextTypes, ConversationHandler, CallbackContext
-)
-from telegram.error import TelegramError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+)
+from webdriver_manager.chrome import ChromeDriverManager
 
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log'),
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("bot.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
 
 # Состояния для ConversationHandler
 class BotStates(Enum):
+    """Состояния для ConversationHandler"""
+
     MAIN_MENU = 0
     SETTING_LOGIN = 1
     SETTING_PASSWORD = 2
@@ -55,7 +57,7 @@ class BotStates(Enum):
 class ConfigManager:
     """Менеджер конфигурации с сохранением в файл"""
 
-    def __init__(self, config_file='bot_config.pkl'):
+    def __init__(self, config_file="bot_config.pkl"):
         self.config_file = config_file
         self.config = self.load_config()
 
@@ -63,27 +65,27 @@ class ConfigManager:
         """Загрузка конфигурации из файла"""
         try:
             if os.path.exists(self.config_file):
-                with open(self.config_file, 'rb') as f:
+                with open(self.config_file, "rb") as f:
                     return pickle.load(f)
         except Exception as e:
             logger.error(f"Ошибка загрузки конфигурации: {e}")
 
         # Конфигурация по умолчанию
         return {
-            'platform_login': '',
-            'platform_password': '',
-            'school_id': '',
-            'campus_name': '',
-            'admin_chat_id': '',
-            'is_configured': False,
-            'last_update': None
+            "platform_login": "",
+            "platform_password": "",
+            "school_id": "",
+            "campus_name": "",
+            "admin_chat_id": "",
+            "is_configured": False,
+            "last_update": None,
         }
 
     def save_config(self):
         """Сохранение конфигурации в файл"""
         try:
-            self.config['last_update'] = datetime.now()
-            with open(self.config_file, 'wb') as f:
+            self.config["last_update"] = datetime.now()
+            with open(self.config_file, "wb") as f:
                 pickle.dump(self.config, f)
             logger.info("Конфигурация сохранена")
         except Exception as e:
@@ -92,25 +94,27 @@ class ConfigManager:
     def update_setting(self, key: str, value: str):
         """Обновление настройки"""
         self.config[key] = value
-        self.config['is_configured'] = all([
-            self.config['platform_login'],
-            self.config['platform_password'],
-            self.config['school_id'],
-            self.config['admin_chat_id']
-        ])
+        self.config["is_configured"] = all(
+            [
+                self.config["platform_login"],
+                self.config["platform_password"],
+                self.config["school_id"],
+                self.config["admin_chat_id"],
+            ]
+        )
         self.save_config()
 
     def get_config_status(self) -> Tuple[bool, List[str]]:
         """Проверка полноты конфигурации"""
         missing = []
-        if not self.config['platform_login']:
-            missing.append('логин')
-        if not self.config['platform_password']:
-            missing.append('пароль')
-        if not self.config['school_id']:
-            missing.append('кампус')
-        if not self.config['admin_chat_id']:
-            missing.append('admin_chat_id')
+        if not self.config["platform_login"]:
+            missing.append("логин")
+        if not self.config["platform_password"]:
+            missing.append("пароль")
+        if not self.config["school_id"]:
+            missing.append("кампус")
+        if not self.config["admin_chat_id"]:
+            missing.append("admin_chat_id")
 
         return len(missing) == 0, missing
 
@@ -147,13 +151,15 @@ class SchoolPlatformManager:
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
+        chrome_options.add_experimental_option("useAutomationExtension", False)
 
         try:
             # Попробуем использовать webdriver-manager с автоматическим определением
             service = Service(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=chrome_options)
-            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            driver.execute_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
             return driver
         except Exception as e:
             logger.warning(f"Стандартный метод не сработал: {e}")
@@ -164,7 +170,6 @@ class SchoolPlatformManager:
 
     def _setup_driver_manual(self, chrome_options):
         """Ручная настройка драйвера с поиском браузера"""
-        import subprocess
         import shutil
 
         # Список возможных путей к браузерам
@@ -194,7 +199,12 @@ class SchoolPlatformManager:
 
         # Если не нашли по путям, пробуем найти через which
         if not found_browser:
-            for browser_cmd in ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]:
+            for browser_cmd in [
+                "google-chrome",
+                "google-chrome-stable",
+                "chromium",
+                "chromium-browser",
+            ]:
                 try:
                     browser_path = shutil.which(browser_cmd)
                     if browser_path:
@@ -214,19 +224,23 @@ class SchoolPlatformManager:
             # Пробуем с найденным путем к браузеру
             service = Service(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=chrome_options)
-            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            driver.execute_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
             return driver
         except Exception as e:
             logger.error(f"Ошибка при создании драйвера: {e}")
             raise
 
-    def login_and_get_token(self, login: str = None, password: str = None) -> Optional[str]:
+    def login_and_get_token(
+        self, login: str = None, password: str = None
+    ) -> Optional[str]:
         """Авторизация на платформе и получение токена из различных источников"""
         driver = None
 
         # Используем переданные учетные данные или из конфигурации
-        login = login or self.config_manager.config['platform_login']
-        password = password or self.config_manager.config['platform_password']
+        login = login or self.config_manager.config["platform_login"]
+        password = password or self.config_manager.config["platform_password"]
 
         if not login or not password:
             logger.error("Логин или пароль не установлены")
@@ -282,13 +296,17 @@ class SchoolPlatformManager:
         try:
             # Ждем завершения авторизации - проверяем различные условия
             WebDriverWait(driver, timeout).until(
-                lambda d: any([
-                    self._has_token_in_url(d),
-                    self._has_token_in_local_storage(d),
-                    self._has_token_in_session_storage(d),
-                    self._has_token_in_cookies(d),
-                    self._is_dashboard_loaded(d)  # Или загрузилась главная страница
-                ])
+                lambda d: any(
+                    [
+                        self._has_token_in_url(d),
+                        self._has_token_in_local_storage(d),
+                        self._has_token_in_session_storage(d),
+                        self._has_token_in_cookies(d),
+                        self._is_dashboard_loaded(
+                            d
+                        ),  # Или загрузилась главная страница
+                    ]
+                )
             )
 
             # Пробуем извлечь токен из разных источников
@@ -297,7 +315,7 @@ class SchoolPlatformManager:
                 self._extract_token_from_session_storage,
                 self._extract_token_from_cookies,
                 self._extract_token_from_url,
-                self._extract_token_from_page_content
+                self._extract_token_from_page_content,
             ]
 
             for source_method in token_sources:
@@ -341,7 +359,7 @@ class SchoolPlatformManager:
         try:
             cookies = driver.get_cookies()
             token_names = ["tokenId", "access_token", "id_token", "token", "authToken"]
-            return any(cookie['name'] in token_names for cookie in cookies)
+            return any(cookie["name"] in token_names for cookie in cookies)
         except:
             return False
 
@@ -350,10 +368,13 @@ class SchoolPlatformManager:
         try:
             # Проверяем наличие элементов, характерных для главной страницы после авторизации
             indicators = [
-                "dashboard", "navbar", "menu", "profile",
+                "dashboard",
+                "navbar",
+                "menu",
+                "profile",
                 "//*[contains(text(), 'Dashboard')]",
                 "//*[contains(text(), 'Главная')]",
-                "//*[contains(@class, 'dashboard')]"
+                "//*[contains(@class, 'dashboard')]",
             ]
 
             for indicator in indicators:
@@ -382,7 +403,7 @@ class SchoolPlatformManager:
         # Проверка фрагмента URL
         if parsed_url.fragment:
             fragment_params = parse_qs(parsed_url.fragment)
-            for key in ['tokenId', 'access_token', 'id_token', 'token']:
+            for key in ["tokenId", "access_token", "id_token", "token"]:
                 token = fragment_params.get(key, [None])[0]
                 if token:
                     return token
@@ -390,7 +411,7 @@ class SchoolPlatformManager:
         # Проверка query параметров
         if parsed_url.query:
             query_params = parse_qs(parsed_url.query)
-            for key in ['tokenId', 'access_token', 'id_token', 'token']:
+            for key in ["tokenId", "access_token", "id_token", "token"]:
                 token = query_params.get(key, [None])[0]
                 if token:
                     return token
@@ -402,7 +423,9 @@ class SchoolPlatformManager:
         try:
             token_keys = ["tokenId", "access_token", "id_token", "token", "authToken"]
             for key in token_keys:
-                token = driver.execute_script(f"return window.localStorage.getItem('{key}');")
+                token = driver.execute_script(
+                    f"return window.localStorage.getItem('{key}');"
+                )
                 if token:
                     return token
             return None
@@ -415,7 +438,9 @@ class SchoolPlatformManager:
         try:
             token_keys = ["tokenId", "access_token", "id_token", "token", "authToken"]
             for key in token_keys:
-                token = driver.execute_script(f"return window.sessionStorage.getItem('{key}');")
+                token = driver.execute_script(
+                    f"return window.sessionStorage.getItem('{key}');"
+                )
                 if token:
                     return token
             return None
@@ -429,8 +454,8 @@ class SchoolPlatformManager:
             cookies = driver.get_cookies()
             token_names = ["tokenId", "access_token", "id_token", "token", "authToken"]
             for cookie in cookies:
-                if cookie['name'] in token_names:
-                    return cookie['value']
+                if cookie["name"] in token_names:
+                    return cookie["value"]
             return None
         except Exception as e:
             logger.warning(f"Ошибка при чтении cookies: {e}")
@@ -449,11 +474,12 @@ class SchoolPlatformManager:
                         r"tokenId['\"]?\\s*[:=]\\s*['\"]([^'\"]+)['\"]",
                         r"access_token['\"]?\\s*[:=]\\s*['\"]([^'\"]+)['\"]",
                         r"id_token['\"]?\\s*[:=]\\s*['\"]([^'\"]+)['\"]",
-                        r"token['\"]?\\s*[:=]\\s*['\"]([^'\"]+)['\"]"
+                        r"token['\"]?\\s*[:=]\\s*['\"]([^'\"]+)['\"]",
                     ]
 
                     for pattern in token_patterns:
                         import re
+
                         match = re.search(pattern, script_content)
                         if match:
                             return match.group(1)
@@ -470,7 +496,7 @@ class SchoolPlatformManager:
         # Проверка фрагмента URL
         if parsed_url.fragment:
             fragment_params = parse_qs(parsed_url.fragment)
-            for key in ['tokenId', 'access_token', 'id_token']:
+            for key in ["tokenId", "access_token", "id_token"]:
                 token = fragment_params.get(key, [None])[0]
                 if token:
                     return token
@@ -478,7 +504,7 @@ class SchoolPlatformManager:
         # Проверка query параметров
         if parsed_url.query:
             query_params = parse_qs(parsed_url.query)
-            for key in ['tokenId', 'access_token', 'id_token']:
+            for key in ["tokenId", "access_token", "id_token"]:
                 token = query_params.get(key, [None])[0]
                 if token:
                     return token
@@ -494,8 +520,8 @@ class SchoolPlatformManager:
         url = "https://platform.21-school.ru/services/21-school/api/v1/campuses"
 
         headers = {
-            'Authorization': f'Bearer {self.token}',
-            'User-Agent': 'Mozilla/5.0 (compatible; SchoolNotifier/1.0)'
+            "Authorization": f"Bearer {self.token}",
+            "User-Agent": "Mozilla/5.0 (compatible; SchoolNotifier/1.0)",
         }
 
         try:
@@ -503,7 +529,7 @@ class SchoolPlatformManager:
             response.raise_for_status()
 
             data = response.json()
-            campuses = data.get('campuses', [])
+            campuses = data.get("campuses", [])
 
             logger.info(f"Получено {len(campuses)} кампусов")
             self.campuses = campuses
@@ -522,7 +548,7 @@ class SchoolPlatformManager:
             logger.error("Токен не установлен")
             return None
 
-        school_id = self.config_manager.config['school_id']
+        school_id = self.config_manager.config["school_id"]
         if not school_id:
             logger.error("School ID не установлен")
             return None
@@ -531,12 +557,7 @@ class SchoolPlatformManager:
 
         payload = {
             "operationName": "getUserNotifications",
-            "variables": {
-                "paging": {
-                    "offset": 0,
-                    "limit": 50
-                }
-            },
+            "variables": {"paging": {"offset": 0, "limit": 50}},
             "query": """query getUserNotifications($paging: PagingInput!) {
                 s21Notification {
                     getS21Notifications(paging: $paging) {
@@ -556,16 +577,16 @@ class SchoolPlatformManager:
                     }
                     __typename
                 }
-            }"""
+            }""",
         }
 
         headers = {
-            'userrole': 'STUDENT',
-            'accept': 'application/json',
-            'content-type': 'application/json',
-            'schoolid': school_id,
-            'Authorization': f'Bearer {self.token}',
-            'User-Agent': 'Mozilla/5.0 (compatible; SchoolNotifier/1.0)'
+            "userrole": "STUDENT",
+            "accept": "application/json",
+            "content-type": "application/json",
+            "schoolid": school_id,
+            "Authorization": f"Bearer {self.token}",
+            "User-Agent": "Mozilla/5.0 (compatible; SchoolNotifier/1.0)",
         }
 
         try:
@@ -574,12 +595,16 @@ class SchoolPlatformManager:
 
             data = response.json()
 
-            if 'errors' in data:
+            if "errors" in data:
                 logger.error(f"GraphQL ошибки: {data['errors']}")
                 return None
 
-            notifications = data.get('data', {}).get('s21Notification', {}).get('getS21Notifications', {}).get(
-                'notifications', [])
+            notifications = (
+                data.get("data", {})
+                .get("s21Notification", {})
+                .get("getS21Notifications", {})
+                .get("notifications", [])
+            )
             return notifications
 
         except requests.exceptions.RequestException as e:
@@ -595,7 +620,7 @@ class SchoolPlatformManager:
         if not current_notifications:
             return []
 
-        current_ids = {n['id'] for n in current_notifications}
+        current_ids = {n["id"] for n in current_notifications}
 
         # Если это первый запуск, сохраняем ID и не возвращаем уведомления
         if not self.last_notification_ids:
@@ -604,7 +629,7 @@ class SchoolPlatformManager:
 
         # Находим новые уведомления
         new_ids = current_ids - self.last_notification_ids
-        new_notifications = [n for n in current_notifications if n['id'] in new_ids]
+        new_notifications = [n for n in current_notifications if n["id"] in new_ids]
 
         # Обновляем множество ID
         self.last_notification_ids = current_ids
@@ -625,97 +650,111 @@ class TelegramSchoolNotifier:
 
         # Статистика
         self.stats = {
-            'last_check': None,
-            'total_checks': 0,
-            'notifications_sent': 0,
-            'errors': 0
+            "last_check": None,
+            "total_checks": 0,
+            "notifications_sent": 0,
+            "errors": 0,
         }
 
         # Устанавливаем admin_chat_id при первом запуске
         self.setup_admin_chat_id()
 
-    async def open_settings_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def open_settings_menu(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Открывает меню настроек при нажатии кнопки"""
         chat_id = str(update.effective_chat.id)
-        if chat_id != self.config_manager.config['admin_chat_id']:
-            await update.message.reply_text("⛔ У вас нет прав для управления этим ботом")
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text(
+                "⛔ У вас нет прав для управления этим ботом"
+            )
             return
 
         await update.message.reply_text(
             "⚙️ Настройки платформы 21-school:",
-            reply_markup=self.get_settings_keyboard()
+            reply_markup=self.get_settings_keyboard(),
         )
 
     async def request_login(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Запрос логина"""
         chat_id = str(update.effective_chat.id)
-        if chat_id != self.config_manager.config['admin_chat_id']:
-            await update.message.reply_text("⛔ У вас нет прав для управления этим ботом")
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text(
+                "⛔ У вас нет прав для управления этим ботом"
+            )
             return
 
         await update.message.reply_text(
             "Введите ваш логин от платформы 21-school:",
-            reply_markup=ReplyKeyboardRemove()
+            reply_markup=ReplyKeyboardRemove(),
         )
-        context.user_data['awaiting_login'] = True
+        context.user_data["awaiting_login"] = True
 
-    async def request_password(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def request_password(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Запрос пароля"""
         chat_id = str(update.effective_chat.id)
-        if chat_id != self.config_manager.config['admin_chat_id']:
-            await update.message.reply_text("⛔ У вас нет прав для управления этим ботом")
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text(
+                "⛔ У вас нет прав для управления этим ботом"
+            )
             return
 
         await update.message.reply_text(
             "Введите ваш пароль от платформы 21-school:",
-            reply_markup=ReplyKeyboardRemove()
+            reply_markup=ReplyKeyboardRemove(),
         )
-        context.user_data['awaiting_password'] = True
+        context.user_data["awaiting_password"] = True
 
-    async def back_to_main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def back_to_main_menu(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Возврат в главное меню"""
         chat_id = str(update.effective_chat.id)
-        if chat_id != self.config_manager.config['admin_chat_id']:
-            await update.message.reply_text("⛔ У вас нет прав для управления этим ботом")
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text(
+                "⛔ У вас нет прав для управления этим ботом"
+            )
             return
 
         await update.message.reply_text(
-            "Главное меню:",
-            reply_markup=self.get_main_menu_keyboard()
+            "Главное меню:", reply_markup=self.get_main_menu_keyboard()
         )
 
-    async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle_text_input(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Обрабатывает текстовый ввод (логин, пароль, выбор кампуса)"""
         chat_id = str(update.effective_chat.id)
-        if chat_id != self.config_manager.config['admin_chat_id']:
+        if chat_id != self.config_manager.config["admin_chat_id"]:
             return
 
         text = update.message.text
         logger.info(f"Обработка текстового ввода: '{text}'")
 
         # Проверяем, ожидаем ли мы выбор кампуса
-        if context.user_data.get('awaiting_campus_selection'):
+        if context.user_data.get("awaiting_campus_selection"):
             logger.info("Обрабатываем выбор кампуса")
             await self.handle_campus_selection(update, context)
             return
 
         # Остальная логика для логина и пароля
-        if context.user_data.get('awaiting_login'):
-            self.config_manager.update_setting('platform_login', text)
+        if context.user_data.get("awaiting_login"):
+            self.config_manager.update_setting("platform_login", text)
             await update.message.reply_text(
                 f"✅ Логин установлен: {text}",
-                reply_markup=self.get_settings_keyboard()
+                reply_markup=self.get_settings_keyboard(),
             )
-            context.user_data['awaiting_login'] = False
+            context.user_data["awaiting_login"] = False
             logger.info("Логин установлен")
 
-        elif context.user_data.get('awaiting_password'):
-            self.config_manager.update_setting('platform_password', text)
+        elif context.user_data.get("awaiting_password"):
+            self.config_manager.update_setting("platform_password", text)
             await update.message.reply_text(
-                "✅ Пароль установлен",
-                reply_markup=self.get_settings_keyboard()
+                "✅ Пароль установлен", reply_markup=self.get_settings_keyboard()
             )
-            context.user_data['awaiting_password'] = False
+            context.user_data["awaiting_password"] = False
             logger.info("Пароль установлен")
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -723,21 +762,23 @@ class TelegramSchoolNotifier:
         chat_id = str(update.effective_chat.id)
 
         # Устанавливаем admin_chat_id при первом запуске
-        if not self.config_manager.config['admin_chat_id']:
-            self.config_manager.update_setting('admin_chat_id', chat_id)
+        if not self.config_manager.config["admin_chat_id"]:
+            self.config_manager.update_setting("admin_chat_id", chat_id)
             await update.message.reply_text(
                 "👋 Добро пожаловать! Вы установлены как администратор бота.\n\n"
                 "Пожалуйста, настройте параметры для работы с платформой 21-school.",
-                reply_markup=self.get_main_menu_keyboard()
+                reply_markup=self.get_main_menu_keyboard(),
             )
         else:
-            if chat_id != self.config_manager.config['admin_chat_id']:
-                await update.message.reply_text("⛔ У вас нет прав для управления этим ботом")
+            if chat_id != self.config_manager.config["admin_chat_id"]:
+                await update.message.reply_text(
+                    "⛔ У вас нет прав для управления этим ботом"
+                )
                 return
 
             await update.message.reply_text(
                 "🤖 Бот для уведомлений 21-school готов к работе!",
-                reply_markup=self.get_main_menu_keyboard()
+                reply_markup=self.get_main_menu_keyboard(),
             )
 
     async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -750,15 +791,17 @@ class TelegramSchoolNotifier:
 
     def setup_admin_chat_id(self):
         """Установка admin_chat_id при первом запуске"""
-        if not self.config_manager.config['admin_chat_id']:
-            logger.info("Admin chat ID не установлен, будет установлен при первом сообщении")
+        if not self.config_manager.config["admin_chat_id"]:
+            logger.info(
+                "Admin chat ID не установлен, будет установлен при первом сообщении"
+            )
 
     def get_main_menu_keyboard(self):
         """Клавиатура главного меню"""
         keyboard = [
             ["⚙️ Настройки", "📊 Статус"],
             ["▶️ Запуск", "⏹️ Остановка"],
-            ["🔐 Тест авторизации", "🔄 Сброс настроек"]
+            ["🔐 Тест авторизации", "🔄 Сброс настроек"],
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -767,7 +810,7 @@ class TelegramSchoolNotifier:
         keyboard = [
             ["👤 Установить логин", "🔑 Установить пароль"],
             ["🏫 Выбрать кампус", "✅ Проверить настройки"],
-            ["🔙 Главное меню"]
+            ["🔙 Главное меню"],
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -778,7 +821,7 @@ class TelegramSchoolNotifier:
 
         for i, campus in enumerate(campuses):
             # Ограничиваем длину текста для кнопки
-            campus_name = campus['fullName']
+            campus_name = campus["fullName"]
             if len(campus_name) > 30:
                 campus_name = campus_name[:27] + "..."
 
@@ -796,21 +839,23 @@ class TelegramSchoolNotifier:
         """Обработчик команды /start"""
         # Устанавливаем admin_chat_id при первом запуске
         chat_id = str(update.effective_chat.id)
-        if not self.config_manager.config['admin_chat_id']:
-            self.config_manager.update_setting('admin_chat_id', chat_id)
+        if not self.config_manager.config["admin_chat_id"]:
+            self.config_manager.update_setting("admin_chat_id", chat_id)
             await update.message.reply_text(
                 "👋 Добро пожаловать! Вы установлены как администратор бота.\n\n"
                 "Пожалуйста, настройте параметры для работы с платформой 21-school.",
-                reply_markup=self.get_main_menu_keyboard()
+                reply_markup=self.get_main_menu_keyboard(),
             )
         else:
-            if chat_id != self.config_manager.config['admin_chat_id']:
-                await update.message.reply_text("⛔ У вас нет прав для управления этим ботом")
+            if chat_id != self.config_manager.config["admin_chat_id"]:
+                await update.message.reply_text(
+                    "⛔ У вас нет прав для управления этим ботом"
+                )
                 return
 
             await update.message.reply_text(
                 "🤖 Бот для уведомлений 21-school готов к работе!",
-                reply_markup=self.get_main_menu_keyboard()
+                reply_markup=self.get_main_menu_keyboard(),
             )
 
         return BotStates.MAIN_MENU
@@ -818,8 +863,10 @@ class TelegramSchoolNotifier:
     async def main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Главное меню"""
         chat_id = str(update.effective_chat.id)
-        if chat_id != self.config_manager.config['admin_chat_id']:
-            await update.message.reply_text("⛔ У вас нет прав для управления этим ботом")
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text(
+                "⛔ У вас нет прав для управления этим ботом"
+            )
             return
 
         text = update.message.text
@@ -827,7 +874,7 @@ class TelegramSchoolNotifier:
         if text == "⚙️ Настройки":
             await update.message.reply_text(
                 "⚙️ Настройки платформы 21-school:",
-                reply_markup=self.get_settings_keyboard()
+                reply_markup=self.get_settings_keyboard(),
             )
             return BotStates.MAIN_MENU
 
@@ -851,8 +898,10 @@ class TelegramSchoolNotifier:
     async def settings_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Меню настроек"""
         chat_id = str(update.effective_chat.id)
-        if chat_id != self.config_manager.config['admin_chat_id']:
-            await update.message.reply_text("⛔ У вас нет прав для управления этим ботом")
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text(
+                "⛔ У вас нет прав для управления этим ботом"
+            )
             return BotStates.MAIN_MENU
 
         text = update.message.text
@@ -860,14 +909,14 @@ class TelegramSchoolNotifier:
         if text == "👤 Установить логин":
             await update.message.reply_text(
                 "Введите ваш логин от платформы 21-school:",
-                reply_markup=ReplyKeyboardRemove()
+                reply_markup=ReplyKeyboardRemove(),
             )
             return BotStates.SETTING_LOGIN
 
         elif text == "🔑 Установить пароль":
             await update.message.reply_text(
                 "Введите ваш пароль от платформы 21-school:",
-                reply_markup=ReplyKeyboardRemove()
+                reply_markup=ReplyKeyboardRemove(),
             )
             return BotStates.SETTING_PASSWORD
 
@@ -879,8 +928,7 @@ class TelegramSchoolNotifier:
 
         elif text == "🔙 Главное меню":
             await update.message.reply_text(
-                "Главное меню:",
-                reply_markup=self.get_main_menu_keyboard()
+                "Главное меню:", reply_markup=self.get_main_menu_keyboard()
             )
             return BotStates.MAIN_MENU
 
@@ -889,11 +937,10 @@ class TelegramSchoolNotifier:
     async def set_login(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Установка логина"""
         login = update.message.text.strip()
-        self.config_manager.update_setting('platform_login', login)
+        self.config_manager.update_setting("platform_login", login)
 
         await update.message.reply_text(
-            f"✅ Логин установлен: {login}",
-            reply_markup=self.get_settings_keyboard()
+            f"✅ Логин установлен: {login}", reply_markup=self.get_settings_keyboard()
         )
 
         return BotStates.MAIN_MENU
@@ -901,11 +948,10 @@ class TelegramSchoolNotifier:
     async def set_password(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Установка пароля"""
         password = update.message.text.strip()
-        self.config_manager.update_setting('platform_password', password)
+        self.config_manager.update_setting("platform_password", password)
 
         await update.message.reply_text(
-            "✅ Пароль установлен",
-            reply_markup=self.get_settings_keyboard()
+            "✅ Пароль установлен", reply_markup=self.get_settings_keyboard()
         )
 
         return BotStates.MAIN_MENU
@@ -913,28 +959,35 @@ class TelegramSchoolNotifier:
     async def select_campus(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Выбор кампуса из списка"""
         chat_id = str(update.effective_chat.id)
-        if chat_id != self.config_manager.config['admin_chat_id']:
-            await update.message.reply_text("⛔ У вас нет прав для управления этим ботом")
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text(
+                "⛔ У вас нет прав для управления этим ботом"
+            )
             return
 
         logger.info("Начало выбора кампуса...")
 
         # Проверяем, установлены ли логин и пароль
-        if not self.config_manager.config['platform_login'] or not self.config_manager.config['platform_password']:
+        if (
+            not self.config_manager.config["platform_login"]
+            or not self.config_manager.config["platform_password"]
+        ):
             await update.message.reply_text(
                 "❌ Сначала установите логин и пароль для авторизации.",
-                reply_markup=self.get_settings_keyboard()
+                reply_markup=self.get_settings_keyboard(),
             )
             return
 
-        await update.message.reply_text("🔐 Выполняю авторизацию для получения списка кампусов...")
+        await update.message.reply_text(
+            "🔐 Выполняю авторизацию для получения списка кампусов..."
+        )
 
         # Выполняем авторизацию
         token = self.platform_manager.login_and_get_token()
         if not token:
             await update.message.reply_text(
                 "❌ Ошибка авторизации! Проверьте логин и пароль.",
-                reply_markup=self.get_settings_keyboard()
+                reply_markup=self.get_settings_keyboard(),
             )
             return
 
@@ -943,31 +996,34 @@ class TelegramSchoolNotifier:
         if not campuses:
             await update.message.reply_text(
                 "❌ Не удалось получить список кампусов. Попробуйте позже.",
-                reply_markup=self.get_settings_keyboard()
+                reply_markup=self.get_settings_keyboard(),
             )
             return
 
         logger.info(f"Получено {len(campuses)} кампусов")
 
         # Сохраняем кампусы в контексте для использования при выборе
-        context.user_data['campuses'] = campuses
-        context.user_data['awaiting_campus_selection'] = True
+        context.user_data["campuses"] = campuses
+        context.user_data["awaiting_campus_selection"] = True
 
         # Создаем клавиатуру с кампусами
         keyboard = self.get_campuses_keyboard(campuses)
 
         await update.message.reply_text(
-            "🏫 Выберите ваш кампус из списка:",
-            reply_markup=keyboard
+            "🏫 Выберите ваш кампус из списка:", reply_markup=keyboard
         )
 
         logger.info("Клавиатура с кампусами отправлена пользователю")
 
-    async def handle_campus_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle_campus_selection(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Обработка выбора кампуса"""
         chat_id = str(update.effective_chat.id)
-        if chat_id != self.config_manager.config['admin_chat_id']:
-            await update.message.reply_text("⛔ У вас нет прав для управления этим ботом")
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text(
+                "⛔ У вас нет прав для управления этим ботом"
+            )
             return
 
         logger.info(f"Получено сообщение: {update.message.text}")
@@ -976,22 +1032,21 @@ class TelegramSchoolNotifier:
 
         if selected_campus_name == "🔙 Назад к настройкам":
             await update.message.reply_text(
-                "Возвращаюсь к настройкам:",
-                reply_markup=self.get_settings_keyboard()
+                "Возвращаюсь к настройкам:", reply_markup=self.get_settings_keyboard()
             )
-            context.user_data['awaiting_campus_selection'] = False
+            context.user_data["awaiting_campus_selection"] = False
             logger.info("Пользователь вернулся к настройкам")
             return
 
         # Ищем выбранный кампус в списке
-        campuses = context.user_data.get('campuses', [])
+        campuses = context.user_data.get("campuses", [])
         logger.info(f"Ищем кампус в списке из {len(campuses)} элементов")
 
         selected_campus = None
 
         # Сначала ищем точное совпадение
         for campus in campuses:
-            if campus['fullName'] == selected_campus_name:
+            if campus["fullName"] == selected_campus_name:
                 selected_campus = campus
                 logger.info(f"Найдено точное совпадение: {campus['fullName']}")
                 break
@@ -999,7 +1054,7 @@ class TelegramSchoolNotifier:
         # Если не нашли, ищем частичное совпадение
         if not selected_campus:
             for campus in campuses:
-                if selected_campus_name in campus['fullName']:
+                if selected_campus_name in campus["fullName"]:
                     selected_campus = campus
                     logger.info(f"Найдено частичное совпадение: {campus['fullName']}")
                     break
@@ -1007,41 +1062,49 @@ class TelegramSchoolNotifier:
         # Если все еще не нашли, ищем по короткому имени
         if not selected_campus:
             for campus in campuses:
-                if selected_campus_name == campus['shortName']:
+                if selected_campus_name == campus["shortName"]:
                     selected_campus = campus
                     logger.info(f"Найдено по shortName: {campus['shortName']}")
                     break
 
         if selected_campus:
             # Сохраняем выбранный кампус
-            self.config_manager.update_setting('school_id', selected_campus['id'])
-            self.config_manager.update_setting('campus_name', selected_campus['fullName'])
+            self.config_manager.update_setting("school_id", selected_campus["id"])
+            self.config_manager.update_setting(
+                "campus_name", selected_campus["fullName"]
+            )
 
-            logger.info(f"Кампус сохранен: ID={selected_campus['id']}, Name={selected_campus['fullName']}")
+            logger.info(
+                f"Кампус сохранен: ID={selected_campus['id']}, Name={selected_campus['fullName']}"
+            )
 
             await update.message.reply_text(
                 f"✅ Кампус выбран:\n\n"
                 f"🏫 {selected_campus['fullName']}\n"
                 f"🔗 ID: {selected_campus['id']}",
-                reply_markup=self.get_settings_keyboard()
+                reply_markup=self.get_settings_keyboard(),
             )
             logger.info("Сообщение об успешном выборе кампуса отправлено")
         else:
             logger.warning(f"Кампус не найден: '{selected_campus_name}'")
             await update.message.reply_text(
                 "❌ Кампус не найден. Пожалуйста, выберите из списка.",
-                reply_markup=self.get_campuses_keyboard(campuses)
+                reply_markup=self.get_campuses_keyboard(campuses),
             )
 
         # Сбрасываем флаг ожидания выбора кампуса
-        context.user_data['awaiting_campus_selection'] = False
+        context.user_data["awaiting_campus_selection"] = False
 
     async def show_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Показать текущие настройки"""
         config = self.config_manager.config
         is_complete, missing = self.config_manager.get_config_status()
 
-        status = "✅ Полная" if is_complete else f"❌ Неполная (отсутствует: {', '.join(missing)})"
+        status = (
+            "✅ Полная"
+            if is_complete
+            else f"❌ Неполная (отсутствует: {', '.join(missing)})"
+        )
 
         settings_text = f"""
 ⚙️ **Текущие настройки:**
@@ -1055,13 +1118,17 @@ class TelegramSchoolNotifier:
 🕐 **Последнее обновление:** {config['last_update'] or 'Никогда'}
         """
 
-        await update.message.reply_text(settings_text, parse_mode='Markdown')
+        await update.message.reply_text(settings_text, parse_mode="Markdown")
 
-    async def start_monitoring(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def start_monitoring(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Запуск мониторинга"""
         chat_id = str(update.effective_chat.id)
-        if chat_id != self.config_manager.config['admin_chat_id']:
-            await update.message.reply_text("⛔ У вас нет прав для управления этим ботом")
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text(
+                "⛔ У вас нет прав для управления этим ботом"
+            )
             return
 
         # Проверяем полноту конфигурации
@@ -1082,26 +1149,26 @@ class TelegramSchoolNotifier:
         # Начальная авторизация
         auth_result = await self.daily_auth()
         if not auth_result:
-            await update.message.reply_text("❌ Ошибка авторизации! Проверьте настройки.")
+            await update.message.reply_text(
+                "❌ Ошибка авторизации! Проверьте настройки."
+            )
             self.is_running = False
             return
 
         # Настройка планировщика
         self.scheduler.add_job(
-            self.daily_auth,
-            CronTrigger(hour=8, minute=0),
-            id='daily_auth'
+            self.daily_auth, CronTrigger(hour=8, minute=0), id="daily_auth"
         )
 
         self.scheduler.add_job(
             self.check_notifications,
             IntervalTrigger(minutes=5),
-            id='check_notifications'
+            id="check_notifications",
         )
 
         self.scheduler.start()
 
-        campus_name = self.config_manager.config['campus_name']
+        campus_name = self.config_manager.config["campus_name"]
         await update.message.reply_text(
             f"🚀 Мониторинг запущен для кампуса: {campus_name}!\n\n"
             "📅 Ежедневная авторизация: 8:00\n"
@@ -1113,8 +1180,10 @@ class TelegramSchoolNotifier:
     async def stop_monitoring(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Остановка мониторинга"""
         chat_id = str(update.effective_chat.id)
-        if chat_id != self.config_manager.config['admin_chat_id']:
-            await update.message.reply_text("⛔ У вас нет прав для управления этим ботом")
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text(
+                "⛔ У вас нет прав для управления этим ботом"
+            )
             return
 
         if not self.is_running:
@@ -1130,8 +1199,10 @@ class TelegramSchoolNotifier:
     async def test_auth(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Тестирование авторизации"""
         chat_id = str(update.effective_chat.id)
-        if chat_id != self.config_manager.config['admin_chat_id']:
-            await update.message.reply_text("⛔ У вас нет прав для управления этим ботом")
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text(
+                "⛔ У вас нет прав для управления этим ботом"
+            )
             return
 
         await update.message.reply_text("🔐 Тестирование авторизации...")
@@ -1142,8 +1213,10 @@ class TelegramSchoolNotifier:
             campuses = self.platform_manager.get_campuses()
             campus_count = len(campuses) if campuses else 0
 
-            current_campus = self.config_manager.config['campus_name']
-            campus_info = f"\n🏫 Текущий кампус: {current_campus}" if current_campus else ""
+            current_campus = self.config_manager.config["campus_name"]
+            campus_info = (
+                f"\n🏫 Текущий кампус: {current_campus}" if current_campus else ""
+            )
 
             await update.message.reply_text(
                 f"✅ Авторизация успешна!\n\n"
@@ -1173,20 +1246,22 @@ class TelegramSchoolNotifier:
     async def reset_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Сброс настроек"""
         chat_id = str(update.effective_chat.id)
-        if chat_id != self.config_manager.config['admin_chat_id']:
-            await update.message.reply_text("⛔ У вас нет прав для управления этим ботом")
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text(
+                "⛔ У вас нет прав для управления этим ботом"
+            )
             return
 
         # Создаем новую конфигурацию, сохраняя только admin_chat_id
-        admin_chat_id = self.config_manager.config['admin_chat_id']
+        admin_chat_id = self.config_manager.config["admin_chat_id"]
         self.config_manager.config = {
-            'platform_login': '',
-            'platform_password': '',
-            'school_id': '',
-            'campus_name': '',
-            'admin_chat_id': admin_chat_id,
-            'is_configured': False,
-            'last_update': datetime.now()
+            "platform_login": "",
+            "platform_password": "",
+            "school_id": "",
+            "campus_name": "",
+            "admin_chat_id": admin_chat_id,
+            "is_configured": False,
+            "last_update": datetime.now(),
         }
         self.config_manager.save_config()
 
@@ -1195,14 +1270,16 @@ class TelegramSchoolNotifier:
     async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Статус бота"""
         chat_id = str(update.effective_chat.id)
-        if chat_id != self.config_manager.config['admin_chat_id']:
-            await update.message.reply_text("⛔ У вас нет прав для управления этим ботом")
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text(
+                "⛔ У вас нет прав для управления этим ботом"
+            )
             return
 
         status_text = "🟢 Запущен" if self.is_running else "🔴 Остановлен"
         is_complete, missing = self.config_manager.get_config_status()
         config_status = "✅ Полная" if is_complete else f"❌ Неполная"
-        campus_name = self.config_manager.config['campus_name'] or 'Не выбран'
+        campus_name = self.config_manager.config["campus_name"] or "Не выбран"
 
         stats_text = f"""
 🤖 **Статус бота**: {status_text}
@@ -1239,7 +1316,7 @@ class TelegramSchoolNotifier:
 
         except Exception as e:
             logger.error(f"Критическая ошибка при авторизации: {e}")
-            self.stats['errors'] += 1
+            self.stats["errors"] += 1
             return False
 
     async def check_notifications(self):
@@ -1248,14 +1325,16 @@ class TelegramSchoolNotifier:
             return
 
         logger.info("Проверка новых уведомлений...")
-        self.stats['total_checks'] += 1
-        self.stats['last_check'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.stats["total_checks"] += 1
+        self.stats["last_check"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         try:
             # Проверяем актуальность токена
-            if (not self.platform_manager.token or
-                    not self.platform_manager.token_expiry or
-                    self.platform_manager.token_expiry < datetime.now()):
+            if (
+                not self.platform_manager.token
+                or not self.platform_manager.token_expiry
+                or self.platform_manager.token_expiry < datetime.now()
+            ):
                 logger.warning("Токен устарел, выполняем авторизацию...")
                 await self.daily_auth()
                 await asyncio.sleep(5)
@@ -1268,25 +1347,23 @@ class TelegramSchoolNotifier:
                 for notification in new_notifications:
                     await self.send_notification(notification)
 
-                self.stats['notifications_sent'] += len(new_notifications)
+                self.stats["notifications_sent"] += len(new_notifications)
             else:
                 logger.info("Новых уведомлений нет")
 
         except Exception as e:
             logger.error(f"Ошибка при проверке уведомлений: {e}")
-            self.stats['errors'] += 1
+            self.stats["errors"] += 1
 
     async def send_notification(self, notification: Dict):
         """Отправка уведомления в Telegram с правильным форматированием"""
         try:
             message_text = self.format_notification_message(notification)
 
-            admin_chat_id = self.config_manager.config['admin_chat_id']
+            admin_chat_id = self.config_manager.config["admin_chat_id"]
             if admin_chat_id:
                 await self.application.bot.send_message(
-                    chat_id=admin_chat_id,
-                    text=message_text,
-                    parse_mode='MarkdownV2'
+                    chat_id=admin_chat_id, text=message_text, parse_mode="MarkdownV2"
                 )
                 logger.info(f"Уведомление отправлено: {notification['id']}")
 
@@ -1295,31 +1372,33 @@ class TelegramSchoolNotifier:
 
             # Попробуем отправить без форматирования
             try:
-                admin_chat_id = self.config_manager.config['admin_chat_id']
+                admin_chat_id = self.config_manager.config["admin_chat_id"]
                 if admin_chat_id:
                     plain_message = f"🔔 Новое уведомление\n\nВремя: {notification.get('time', 'Неизвестно')}\nТип: {notification.get('groupName', 'Неизвестно')}\n\nСообщение: {self.clean_html(notification.get('message', ''))}"
 
                     await self.application.bot.send_message(
                         chat_id=admin_chat_id,
                         text=plain_message,
-                        parse_mode=None  # Без форматирования
+                        parse_mode=None,  # Без форматирования
                     )
-                    logger.info(f"Уведомление отправлено без форматирования: {notification['id']}")
+                    logger.info(
+                        f"Уведомление отправлено без форматирования: {notification['id']}"
+                    )
             except Exception as e2:
                 logger.error(f"Ошибка отправки уведомления без форматирования: {e2}")
-                self.stats['errors'] += 1
+                self.stats["errors"] += 1
 
     def clean_html(self, text: str) -> str:
         """Очистка HTML тегов из текста"""
         import re
-        clean = re.compile('<.*?>')
-        return re.sub(clean, '', text).replace('&nbsp;', ' ')
+
+        clean = re.compile("<.*?>")
+        return re.sub(clean, "", text).replace("&nbsp;", " ")
 
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Отмена операции"""
         await update.message.reply_text(
-            "Операция отменена.",
-            reply_markup=self.get_main_menu_keyboard()
+            "Операция отменена.", reply_markup=self.get_main_menu_keyboard()
         )
         return BotStates.MAIN_MENU
 
@@ -1334,38 +1413,55 @@ class TelegramSchoolNotifier:
         self.application.add_handler(CommandHandler("status", self.status_command))
 
         # Добавляем обработчики для кнопок главного меню
-        self.application.add_handler(MessageHandler(
-            filters.Regex('^⚙️ Настройки$'), self.open_settings_menu))
-        self.application.add_handler(MessageHandler(
-            filters.Regex('^📊 Статус$'), self.status_command))
-        self.application.add_handler(MessageHandler(
-            filters.Regex('^▶️ Запуск$'), self.start_monitoring))
-        self.application.add_handler(MessageHandler(
-            filters.Regex('^⏹️ Остановка$'), self.stop_command))
-        self.application.add_handler(MessageHandler(
-            filters.Regex('^🔐 Тест авторизации$'), self.test_auth))
-        self.application.add_handler(MessageHandler(
-            filters.Regex('^🔄 Сброс настроек$'), self.reset_settings))
+        self.application.add_handler(
+            MessageHandler(filters.Regex("^⚙️ Настройки$"), self.open_settings_menu)
+        )
+        self.application.add_handler(
+            MessageHandler(filters.Regex("^📊 Статус$"), self.status_command)
+        )
+        self.application.add_handler(
+            MessageHandler(filters.Regex("^▶️ Запуск$"), self.start_monitoring)
+        )
+        self.application.add_handler(
+            MessageHandler(filters.Regex("^⏹️ Остановка$"), self.stop_command)
+        )
+        self.application.add_handler(
+            MessageHandler(filters.Regex("^🔐 Тест авторизации$"), self.test_auth)
+        )
+        self.application.add_handler(
+            MessageHandler(filters.Regex("^🔄 Сброс настроек$"), self.reset_settings)
+        )
 
         # Добавляем обработчики для кнопок настроек
-        self.application.add_handler(MessageHandler(
-            filters.Regex('^👤 Установить логин$'), self.request_login))
-        self.application.add_handler(MessageHandler(
-            filters.Regex('^🔑 Установить пароль$'), self.request_password))
-        self.application.add_handler(MessageHandler(
-            filters.Regex('^🏫 Выбрать кампус$'), self.select_campus))
-        self.application.add_handler(MessageHandler(
-            filters.Regex('^✅ Проверить настройки$'), self.show_settings))
-        self.application.add_handler(MessageHandler(
-            filters.Regex('^🔙 Главное меню$'), self.back_to_main_menu))
+        self.application.add_handler(
+            MessageHandler(filters.Regex("^👤 Установить логин$"), self.request_login)
+        )
+        self.application.add_handler(
+            MessageHandler(
+                filters.Regex("^🔑 Установить пароль$"), self.request_password
+            )
+        )
+        self.application.add_handler(
+            MessageHandler(filters.Regex("^🏫 Выбрать кампус$"), self.select_campus)
+        )
+        self.application.add_handler(
+            MessageHandler(
+                filters.Regex("^✅ Проверить настройки$"), self.show_settings
+            )
+        )
+        self.application.add_handler(
+            MessageHandler(filters.Regex("^🔙 Главное меню$"), self.back_to_main_menu)
+        )
 
         # Обработчик для текстовых сообщений (для ввода логина, пароля)
-        self.application.add_handler(MessageHandler(
-            filters.TEXT & ~filters.COMMAND, self.handle_text_input))
+        self.application.add_handler(
+            MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text_input)
+        )
 
         # Запускаем бота
         logger.info("Запуск Telegram бота...")
         self.application.run_polling()
+
 
 def clean_html(self, text: str) -> str:
     """Очистка HTML тегов из текста с сохранением читаемости"""
@@ -1373,28 +1469,29 @@ def clean_html(self, text: str) -> str:
         return ""
 
     import re
+
     # Заменяем HTML теги на простой текст
     replacements = {
-        r'<br\s*/?>': '\n',
-        r'<p>': '\n',
-        r'</p>': '\n',
-        r'<b>': '*',
-        r'</b>': '*',
-        r'<strong>': '*',
-        r'</strong>': '*',
-        r'<i>': '_',
-        r'</i>': '_',
-        r'<em>': '_',
-        r'</em>': '_',
-        r'<code>': '`',
-        r'</code>': '`',
-        r'<pre>': '```\n',
-        r'</pre>': '\n```',
-        r'&nbsp;': ' ',
-        r'&amp;': '&',
-        r'&lt;': '<',
-        r'&gt;': '>',
-        r'&quot;': '"',
+        r"<br\s*/?>": "\n",
+        r"<p>": "\n",
+        r"</p>": "\n",
+        r"<b>": "*",
+        r"</b>": "*",
+        r"<strong>": "*",
+        r"</strong>": "*",
+        r"<i>": "_",
+        r"</i>": "_",
+        r"<em>": "_",
+        r"</em>": "_",
+        r"<code>": "`",
+        r"</code>": "`",
+        r"<pre>": "```\n",
+        r"</pre>": "\n```",
+        r"&nbsp;": " ",
+        r"&amp;": "&",
+        r"&lt;": "<",
+        r"&gt;": ">",
+        r"&quot;": '"',
     }
 
     cleaned_text = text
@@ -1402,10 +1499,10 @@ def clean_html(self, text: str) -> str:
         cleaned_text = re.sub(pattern, replacement, cleaned_text, flags=re.IGNORECASE)
 
     # Удаляем оставшиеся HTML теги
-    cleaned_text = re.sub(r'<[^>]+>', '', cleaned_text)
+    cleaned_text = re.sub(r"<[^>]+>", "", cleaned_text)
 
     # Убираем лишние переносы строк
-    cleaned_text = re.sub(r'\n\s*\n', '\n\n', cleaned_text)
+    cleaned_text = re.sub(r"\n\s*\n", "\n\n", cleaned_text)
     cleaned_text = cleaned_text.strip()
 
     return cleaned_text
@@ -1417,12 +1514,12 @@ def escape_markdown(self, text: str) -> str:
         return ""
 
     # Символы, которые нужно экранировать в MarkdownV2
-    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    escape_chars = r"_*[]()~`>#+-=|{}.!"
     escaped_text = ""
 
     for char in text:
         if char in escape_chars:
-            escaped_text += '\\' + char
+            escaped_text += "\\" + char
         else:
             escaped_text += char
 
@@ -1432,14 +1529,16 @@ def escape_markdown(self, text: str) -> str:
 def format_notification_message(self, notification: Dict) -> str:
     """Форматирование сообщения об уведомлении"""
     try:
-        time_str = datetime.fromisoformat(notification['time'].replace('Z', '+00:00')).strftime("%d.%m.%Y %H:%M")
-        message_text = self.clean_html(notification['message'])
+        time_str = datetime.fromisoformat(
+            notification["time"].replace("Z", "+00:00")
+        ).strftime("%d.%m.%Y %H:%M")
+        message_text = self.clean_html(notification["message"])
 
         # Экранируем все текстовые поля
         escaped_time = self.escape_markdown(time_str)
-        escaped_type = self.escape_markdown(notification.get('groupName', 'Неизвестно'))
+        escaped_type = self.escape_markdown(notification.get("groupName", "Неизвестно"))
         escaped_message = self.escape_markdown(message_text)
-        escaped_id = self.escape_markdown(notification['id'])
+        escaped_id = self.escape_markdown(notification["id"])
 
         # Форматируем сообщение с использованием MarkdownV2
         formatted_message = f"""
@@ -1461,14 +1560,15 @@ def format_notification_message(self, notification: Dict) -> str:
         # Возвращаем простой текст в случае ошибки
         return f"🔔 Новое уведомление\n\nВремя: {notification.get('time', 'Неизвестно')}\nТип: {notification.get('groupName', 'Неизвестно')}\n\nСообщение: {notification.get('message', '')}"
 
+
 def main():
     """Основная функция"""
-    telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
+    telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
 
     if not telegram_token:
         print("❌ Не установлена переменная окружения TELEGRAM_BOT_TOKEN")
         print("Установите токен: export TELEGRAM_BOT_TOKEN='your_bot_token'")
-        exit(1)
+        sys.exit(1)
 
     # Создаем и запускаем бота
     bot = TelegramSchoolNotifier(telegram_token=telegram_token)
