@@ -1,4 +1,4 @@
-# School 21 Notifier Bot
+# 21 Notifier Bot
 
 Telegram бот для мониторинления уведомлений с платформы 21-school.
 
