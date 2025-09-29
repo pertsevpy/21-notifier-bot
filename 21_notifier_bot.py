@@ -232,12 +232,64 @@ class SchoolPlatformManager:
             logger.error(f"Ошибка при создании драйвера: {e}")
             raise
 
+    def login_via_api(self, login: str = None, password: str = None) -> Optional[str]:
+        """Авторизация через API Keycloak"""
+        # Используем переданные учетные данные или из конфигурации
+        login = login or self.config_manager.config["platform_login"]
+        password = password or self.config_manager.config["platform_password"]
+
+        if not login or not password:
+            logger.error("Логин или пароль не установлены для API авторизации")
+            return None
+
+        url = "https://auth.21-school.ru/auth/realms/EduPowerKeycloak/protocol/openid-connect/token"
+
+        payload = {
+            "client_id": "s21-open-api",
+            "username": login,
+            "password": password,
+            "grant_type": "password",
+        }
+
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+        try:
+            logger.info("Попытка авторизации через API...")
+            response = self.session.post(url, headers=headers, data=payload, timeout=15)
+            response.raise_for_status()
+
+            data = response.json()
+            access_token = data.get("access_token")
+
+            if access_token:
+                logger.info("✅ Токен успешно получен через API")
+                return access_token
+            else:
+                logger.error("❌ Токен не найден в ответе API")
+                return None
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ Ошибка API авторизации: {e}")
+            if hasattr(e, "response") and e.response is not None:
+                status_code = e.response.status_code
+                if status_code == 401:
+                    logger.error("Неверный логин или пароль")
+                elif status_code == 400:
+                    logger.error("Неверный запрос к API")
+                elif status_code >= 500:
+                    logger.error("Проблемы на сервере авторизации")
+            return None
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Ошибка парсинга JSON ответа API: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Неожиданная ошибка при API авторизации: {e}")
+            return None
+
     def login_and_get_token(
         self, login: str = None, password: str = None
     ) -> Optional[str]:
-        """Авторизация на платформе и получение токена из различных источников"""
-        driver = None
-
+        """Авторизация на платформе с приоритетом API, fallback на Selenium"""
         # Используем переданные учетные данные или из конфигурации
         login = login or self.config_manager.config["platform_login"]
         password = password or self.config_manager.config["platform_password"]
@@ -246,9 +298,39 @@ class SchoolPlatformManager:
             logger.error("Логин или пароль не установлены")
             return None
 
+        # Пробуем сначала API метод
+        logger.info("🔄 Попытка авторизации через API...")
+        api_token = self.login_via_api(login, password)
+
+        if api_token:
+            self.token = api_token
+            self.token_expiry = datetime.now() + timedelta(
+                hours=10
+            )  # API токен живет 10 часов
+            logger.info("✅ Авторизация через API успешна")
+            return api_token
+
+        # Если API не сработал, используем Selenium как fallback
+        logger.warning("❌ API авторизация не удалась, пробуем через Selenium...")
+        selenium_token = self.login_via_selenium(login, password)
+
+        if selenium_token:
+            self.token = selenium_token
+            self.token_expiry = datetime.now() + timedelta(
+                hours=23
+            )  # Selenium токен живет ~23 часа
+            logger.info("✅ Авторизация через Selenium успешна")
+            return selenium_token
+
+        logger.error("❌ Все методы авторизации не удались")
+        return None
+
+    def login_via_selenium(self, login: str, password: str) -> Optional[str]:
+        """Авторизация через Selenium (fallback метод)"""
+        driver = None
         try:
-            driver = self.setup_driver(headless=False)  # Оставляем False для отладки
-            logger.info("Запуск браузера для авторизации...")
+            driver = self.setup_driver(headless=True)
+            logger.info("Запуск браузера для авторизации через Selenium...")
 
             driver.get("https://platform.21-school.ru")
 
@@ -269,27 +351,43 @@ class SchoolPlatformManager:
             # Отправка формы
             password_field.submit()
 
-            # Ждем завершения авторизации - разные возможные сценарии
+            # Ждем завершения авторизации
             token = self.wait_for_token(driver)
 
             if token:
-                self.token = token
-                self.token_expiry = datetime.now() + timedelta(hours=23)
-                logger.info("Токен успешно получен")
+                logger.info("✅ Токен получен через Selenium")
                 return token
             else:
-                logger.error("Токен не найден после авторизации")
+                logger.error("❌ Токен не найден после Selenium авторизации")
                 return None
 
         except TimeoutException:
-            logger.error("Таймаут при авторизации")
+            logger.error("❌ Таймаут при Selenium авторизации")
             return None
         except Exception as e:
-            logger.error(f"Ошибка при авторизации: {e}")
+            logger.error(f"❌ Ошибка при Selenium авторизации: {e}")
             return None
         finally:
             if driver:
                 driver.quit()
+
+    def validate_token(self, token: str) -> bool:
+        """Проверка валидности токена через API кампусов"""
+        if not token:
+            return False
+
+        url = "https://platform.21-school.ru/services/21-school/api/v1/campuses"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "Mozilla/5.0 (compatible; SchoolNotifier/1.0)",
+        }
+
+        try:
+            response = self.session.get(url, headers=headers, timeout=10)
+            return response.status_code == 200
+        except:
+            return False
 
     def wait_for_token(self, driver, timeout: int = 30) -> Optional[str]:
         """Ожидание и извлечение токена из различных источников"""
@@ -517,6 +615,15 @@ class SchoolPlatformManager:
             logger.error("Токен не установлен для получения кампусов")
             return None
 
+        # Проверяем валидность токена
+        if not self.validate_token(self.token):
+            logger.warning("Токен невалиден, пробуем переавторизоваться...")
+            new_token = self.login_and_get_token()
+            if not new_token:
+                logger.error("Не удалось переавторизоваться для получения кампусов")
+                return None
+            self.token = new_token
+
         url = "https://platform.21-school.ru/services/21-school/api/v1/campuses"
 
         headers = {
@@ -635,6 +742,104 @@ class SchoolPlatformManager:
         self.last_notification_ids = current_ids
 
         return new_notifications
+
+    def get_last_notification(self) -> Optional[Dict]:
+        """Получение последнего уведомления через GraphQL API"""
+        if not self.token:
+            logger.error("Токен не установлен для получения уведомлений")
+            return None
+
+        # Проверяем валидность токена
+        if not self.validate_token(self.token):
+            logger.warning(
+                "Токен невалиден при запросе уведомлений, пробуем переавторизоваться..."
+            )
+            new_token = self.login_and_get_token()
+            if not new_token:
+                logger.error("Не удалось переавторизоваться для получения уведомлений")
+                return None
+            self.token = new_token
+
+        school_id = self.config_manager.config["school_id"]
+        if not school_id:
+            logger.error("School ID не установлен")
+            return None
+
+        url = "https://platform.21-school.ru/services/graphql"
+
+        # Запрос для получения только последнего уведомления
+        payload = {
+            "operationName": "getUserNotifications",
+            "variables": {
+                "paging": {"offset": 0, "limit": 1}  # Только одно последнее уведомление
+            },
+            "query": """query getUserNotifications($paging: PagingInput!) {
+                s21Notification {
+                    getS21Notifications(paging: $paging) {
+                        notifications {
+                            id
+                            relatedObjectType
+                            relatedObjectId
+                            message
+                            time
+                            wasRead
+                            groupName
+                            __typename
+                        }
+                        totalCount
+                        groupNames
+                        __typename
+                    }
+                    __typename
+                }
+            }""",
+        }
+
+        headers = {
+            "userrole": "STUDENT",
+            "accept": "application/json",
+            "content-type": "application/json",
+            "schoolid": school_id,
+            "Authorization": f"Bearer {self.token}",
+            "User-Agent": "Mozilla/5.0 (compatible; SchoolNotifier/1.0)",
+        }
+
+        try:
+            logger.info("Запрос последнего уведомления...")
+            response = self.session.post(url, json=payload, headers=headers, timeout=15)
+            response.raise_for_status()
+
+            data = response.json()
+
+            if "errors" in data:
+                logger.error(
+                    f"GraphQL ошибки при запросе последнего уведомления: {data['errors']}"
+                )
+                return None
+
+            notifications = (
+                data.get("data", {})
+                .get("s21Notification", {})
+                .get("getS21Notifications", {})
+                .get("notifications", [])
+            )
+
+            if notifications:
+                last_notification = notifications[0]
+                logger.info(
+                    f"Получено последнее уведомление: {last_notification['id']}"
+                )
+                return last_notification
+            else:
+                logger.info("Уведомлений нет")
+                return None
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ошибка при запросе последнего уведомления: {e}")
+            return None
+        except json.JSONDecodeError as e:
+            logger.error(f"Ошибка парсинга JSON последнего уведомления: {e}")
+            return None
 
 
 class TelegramSchoolNotifier:
@@ -799,9 +1004,10 @@ class TelegramSchoolNotifier:
     def get_main_menu_keyboard(self):
         """Клавиатура главного меню"""
         keyboard = [
-            ["⚙️ Настройки", "📊 Статус"],
+            ["📊 Статус"],
             ["▶️ Запуск", "⏹️ Остановка"],
             ["🔐 Тест авторизации", "🔄 Сброс настроек"],
+            ["⚙️ Настройки", "🔔 Последнее уведомление"],
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -1402,6 +1608,70 @@ class TelegramSchoolNotifier:
         )
         return BotStates.MAIN_MENU
 
+    async def last_notification_command(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        """Обработчик кнопки 'Последнее уведомление'"""
+        chat_id = str(update.effective_chat.id)
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text(
+                "⛔ У вас нет прав для управления этим ботом"
+            )
+            return
+
+        await self.show_last_notification(update, context)
+
+    async def show_last_notification(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        """Показывает последнее уведомление"""
+        # Проверяем, настроен ли кампус
+        if not self.config_manager.config["school_id"]:
+            await update.message.reply_text(
+                "❌ Сначала выберите кампус в настройках.",
+                reply_markup=self.get_settings_keyboard(),
+            )
+            return
+
+        await update.message.reply_text("🔍 Запрашиваю последнее уведомление...")
+
+        try:
+            last_notification = self.platform_manager.get_last_notification()
+
+            if last_notification:
+                # Используем универсальный метод отправки
+                message_text = self.format_notification_message(last_notification)
+
+                try:
+                    await update.message.reply_text(
+                        text=message_text, parse_mode="MarkdownV2"
+                    )
+                    logger.info(
+                        f"Последнее уведомление отправлено: {last_notification['id']}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Ошибка отправки последнего уведомления с Markdown: {e}"
+                    )
+                    # Пробуем отправить без форматирования
+                    plain_text = self.format_notification_plain(last_notification, 0)
+                    await update.message.reply_text(plain_text)
+            else:
+                await update.message.reply_text(
+                    "📭 Уведомлений нет.\n"
+                    "Когда появятся новые уведомления, они будут отображаться здесь."
+                )
+
+        except Exception as e:
+            logger.error(f"Ошибка при получении последнего уведомления: {e}")
+            await update.message.reply_text(
+                "❌ Ошибка при получении уведомления.\n"
+                "Проверьте:\n"
+                "• Настройки авторизации\n"
+                "• Выбор кампуса\n"
+                "• Интернет-соединение"
+            )
+
     def run(self):
         """Синхронный запуск бота"""
         # Создаем приложение Telegram
@@ -1451,6 +1721,12 @@ class TelegramSchoolNotifier:
         )
         self.application.add_handler(
             MessageHandler(filters.Regex("^🔙 Главное меню$"), self.back_to_main_menu)
+        )
+        self.application.add_handler(
+            MessageHandler(
+                filters.Regex("^🔔 Последнее уведомление$"),
+                self.last_notification_command,
+            )
         )
 
         # Обработчик для текстовых сообщений (для ввода логина, пароля)
