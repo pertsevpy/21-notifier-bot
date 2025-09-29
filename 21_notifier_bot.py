@@ -149,8 +149,12 @@ class SchoolPlatformManager:
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_argument(
+            "--disable-blink-features=AutomationControlled"
+        )
+        chrome_options.add_experimental_option(
+            "excludeSwitches", ["enable-automation"]
+        )
         chrome_options.add_experimental_option("useAutomationExtension", False)
 
         try:
@@ -209,7 +213,9 @@ class SchoolPlatformManager:
                     browser_path = shutil.which(browser_cmd)
                     if browser_path:
                         found_browser = browser_path
-                        logger.info(f"Найден браузер через which: {browser_path}")
+                        logger.info(
+                            f"Найден браузер через which: {browser_path}"
+                        )
                         break
                 except:
                     continue
@@ -225,14 +231,17 @@ class SchoolPlatformManager:
             service = Service(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=chrome_options)
             driver.execute_script(
-                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+                "Object.defineProperty(navigator, 'webdriver', "
+                "{get: () => undefined})"
             )
             return driver
         except Exception as e:
             logger.error(f"Ошибка при создании драйвера: {e}")
             raise
 
-    def login_via_api(self, login: str = None, password: str = None) -> Optional[str]:
+    def login_via_api(
+        self, login: str = None, password: str = None
+    ) -> Optional[str]:
         """Авторизация через API Keycloak"""
         # Используем переданные учетные данные или из конфигурации
         login = login or self.config_manager.config["platform_login"]
@@ -255,7 +264,9 @@ class SchoolPlatformManager:
 
         try:
             logger.info("Попытка авторизации через API...")
-            response = self.session.post(url, headers=headers, data=payload, timeout=15)
+            response = self.session.post(
+                url, headers=headers, data=payload, timeout=15
+            )
             response.raise_for_status()
 
             data = response.json()
@@ -311,7 +322,9 @@ class SchoolPlatformManager:
             return api_token
 
         # Если API не сработал, используем Selenium как fallback
-        logger.warning("❌ API авторизация не удалась, пробуем через Selenium...")
+        logger.warning(
+            "❌ API авторизация не удалась, пробуем через Selenium..."
+        )
         selenium_token = self.login_via_selenium(login, password)
 
         if selenium_token:
@@ -376,7 +389,9 @@ class SchoolPlatformManager:
         if not token:
             return False
 
-        url = "https://platform.21-school.ru/services/21-school/api/v1/campuses"
+        url = (
+            "https://platform.21-school.ru/services/21-school/api/v1/campuses"
+        )
 
         headers = {
             "Authorization": f"Bearer {token}",
@@ -437,8 +452,16 @@ class SchoolPlatformManager:
     def _has_token_in_local_storage(self, driver) -> bool:
         """Проверяет наличие токена в Local Storage"""
         try:
-            local_storage = driver.execute_script("return window.localStorage;")
-            token_keys = ["tokenId", "access_token", "id_token", "token", "authToken"]
+            local_storage = driver.execute_script(
+                "return window.localStorage;"
+            )
+            token_keys = [
+                "tokenId",
+                "access_token",
+                "id_token",
+                "token",
+                "authToken",
+            ]
             return any(key in local_storage for key in token_keys)
         except:
             return False
@@ -446,8 +469,16 @@ class SchoolPlatformManager:
     def _has_token_in_session_storage(self, driver) -> bool:
         """Проверяет наличие токена в Session Storage"""
         try:
-            session_storage = driver.execute_script("return window.sessionStorage;")
-            token_keys = ["tokenId", "access_token", "id_token", "token", "authToken"]
+            session_storage = driver.execute_script(
+                "return window.sessionStorage;"
+            )
+            token_keys = [
+                "tokenId",
+                "access_token",
+                "id_token",
+                "token",
+                "authToken",
+            ]
             return any(key in session_storage for key in token_keys)
         except:
             return False
@@ -456,7 +487,13 @@ class SchoolPlatformManager:
         """Проверяет наличие токена в cookies"""
         try:
             cookies = driver.get_cookies()
-            token_names = ["tokenId", "access_token", "id_token", "token", "authToken"]
+            token_names = [
+                "tokenId",
+                "access_token",
+                "id_token",
+                "token",
+                "authToken",
+            ]
             return any(cookie["name"] in token_names for cookie in cookies)
         except:
             return False
@@ -480,7 +517,9 @@ class SchoolPlatformManager:
                     if indicator.startswith("//"):
                         elements = driver.find_elements(By.XPATH, indicator)
                     else:
-                        elements = driver.find_elements(By.CLASS_NAME, indicator)
+                        elements = driver.find_elements(
+                            By.CLASS_NAME, indicator
+                        )
                         if not elements:
                             elements = driver.find_elements(By.ID, indicator)
 
@@ -519,7 +558,13 @@ class SchoolPlatformManager:
     def _extract_token_from_local_storage(self, driver) -> Optional[str]:
         """Извлечение токена из Local Storage"""
         try:
-            token_keys = ["tokenId", "access_token", "id_token", "token", "authToken"]
+            token_keys = [
+                "tokenId",
+                "access_token",
+                "id_token",
+                "token",
+                "authToken",
+            ]
             for key in token_keys:
                 token = driver.execute_script(
                     f"return window.localStorage.getItem('{key}');"
@@ -534,7 +579,13 @@ class SchoolPlatformManager:
     def _extract_token_from_session_storage(self, driver) -> Optional[str]:
         """Извлечение токена из Session Storage"""
         try:
-            token_keys = ["tokenId", "access_token", "id_token", "token", "authToken"]
+            token_keys = [
+                "tokenId",
+                "access_token",
+                "id_token",
+                "token",
+                "authToken",
+            ]
             for key in token_keys:
                 token = driver.execute_script(
                     f"return window.sessionStorage.getItem('{key}');"
@@ -550,7 +601,13 @@ class SchoolPlatformManager:
         """Извлечение токена из cookies"""
         try:
             cookies = driver.get_cookies()
-            token_names = ["tokenId", "access_token", "id_token", "token", "authToken"]
+            token_names = [
+                "tokenId",
+                "access_token",
+                "id_token",
+                "token",
+                "authToken",
+            ]
             for cookie in cookies:
                 if cookie["name"] in token_names:
                     return cookie["value"]
@@ -584,7 +641,9 @@ class SchoolPlatformManager:
 
             return None
         except Exception as e:
-            logger.warning(f"Ошибка при поиске токена в содержимом страницы: {e}")
+            logger.warning(
+                f"Ошибка при поиске токена в содержимом страницы: {e}"
+            )
             return None
 
     def extract_token_from_url(self, url: str) -> Optional[str]:
@@ -620,11 +679,15 @@ class SchoolPlatformManager:
             logger.warning("Токен невалиден, пробуем переавторизоваться...")
             new_token = self.login_and_get_token()
             if not new_token:
-                logger.error("Не удалось переавторизоваться для получения кампусов")
+                logger.error(
+                    "Не удалось переавторизоваться для получения кампусов"
+                )
                 return None
             self.token = new_token
 
-        url = "https://platform.21-school.ru/services/21-school/api/v1/campuses"
+        url = (
+            "https://platform.21-school.ru/services/21-school/api/v1/campuses"
+        )
 
         headers = {
             "Authorization": f"Bearer {self.token}",
@@ -697,7 +760,9 @@ class SchoolPlatformManager:
         }
 
         try:
-            response = self.session.post(url, json=payload, headers=headers, timeout=15)
+            response = self.session.post(
+                url, json=payload, headers=headers, timeout=15
+            )
             response.raise_for_status()
 
             data = response.json()
@@ -736,7 +801,9 @@ class SchoolPlatformManager:
 
         # Находим новые уведомления
         new_ids = current_ids - self.last_notification_ids
-        new_notifications = [n for n in current_notifications if n["id"] in new_ids]
+        new_notifications = [
+            n for n in current_notifications if n["id"] in new_ids
+        ]
 
         # Обновляем множество ID
         self.last_notification_ids = current_ids
@@ -752,11 +819,14 @@ class SchoolPlatformManager:
         # Проверяем валидность токена
         if not self.validate_token(self.token):
             logger.warning(
-                "Токен невалиден при запросе уведомлений, пробуем переавторизоваться..."
+                "Токен невалиден при запросе уведомлений, "
+                "пробуем переавторизоваться..."
             )
             new_token = self.login_and_get_token()
             if not new_token:
-                logger.error("Не удалось переавторизоваться для получения уведомлений")
+                logger.error(
+                    "Не удалось переавторизоваться для получения уведомлений"
+                )
                 return None
             self.token = new_token
 
@@ -771,7 +841,10 @@ class SchoolPlatformManager:
         payload = {
             "operationName": "getUserNotifications",
             "variables": {
-                "paging": {"offset": 0, "limit": 1}  # Только одно последнее уведомление
+                "paging": {
+                    "offset": 0,
+                    "limit": 1,
+                }  # Только одно последнее уведомление
             },
             "query": """query getUserNotifications($paging: PagingInput!) {
                 s21Notification {
@@ -806,14 +879,17 @@ class SchoolPlatformManager:
 
         try:
             logger.info("Запрос последнего уведомления...")
-            response = self.session.post(url, json=payload, headers=headers, timeout=15)
+            response = self.session.post(
+                url, json=payload, headers=headers, timeout=15
+            )
             response.raise_for_status()
 
             data = response.json()
 
             if "errors" in data:
                 logger.error(
-                    f"GraphQL ошибки при запросе последнего уведомления: {data['errors']}"
+                    f"GraphQL ошибки при запросе последнего уведомления: "
+                    f"{data['errors']}"
                 )
                 return None
 
@@ -827,7 +903,8 @@ class SchoolPlatformManager:
             if notifications:
                 last_notification = notifications[0]
                 logger.info(
-                    f"Получено последнее уведомление: {last_notification['id']}"
+                    f"Получено последнее уведомление: "
+                    f"{last_notification['id']}"
                 )
                 return last_notification
             else:
@@ -880,7 +957,9 @@ class TelegramSchoolNotifier:
             reply_markup=self.get_settings_keyboard(),
         )
 
-    async def request_login(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def request_login(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Запрос логина"""
         chat_id = str(update.effective_chat.id)
         if chat_id != self.config_manager.config["admin_chat_id"]:
@@ -957,12 +1036,15 @@ class TelegramSchoolNotifier:
         elif context.user_data.get("awaiting_password"):
             self.config_manager.update_setting("platform_password", text)
             await update.message.reply_text(
-                "✅ Пароль установлен", reply_markup=self.get_settings_keyboard()
+                "✅ Пароль установлен",
+                reply_markup=self.get_settings_keyboard(),
             )
             context.user_data["awaiting_password"] = False
             logger.info("Пароль установлен")
 
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def start_command(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Обработчик команды /start"""
         chat_id = str(update.effective_chat.id)
 
@@ -970,8 +1052,10 @@ class TelegramSchoolNotifier:
         if not self.config_manager.config["admin_chat_id"]:
             self.config_manager.update_setting("admin_chat_id", chat_id)
             await update.message.reply_text(
-                "👋 Добро пожаловать! Вы установлены как администратор бота.\n\n"
-                "Пожалуйста, настройте параметры для работы с платформой 21-school.",
+                "👋 Добро пожаловать! "
+                "Вы установлены как администратор бота.\n\n"
+                "Пожалуйста, настройте параметры для работы с платформой "
+                "21-school.",
                 reply_markup=self.get_main_menu_keyboard(),
             )
         else:
@@ -986,11 +1070,15 @@ class TelegramSchoolNotifier:
                 reply_markup=self.get_main_menu_keyboard(),
             )
 
-    async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def stop_command(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Обработчик команды /stop"""
         await self.stop_monitoring(update, context)
 
-    async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def status_command(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Обработчик команды /status"""
         await self.status(update, context)
 
@@ -998,7 +1086,8 @@ class TelegramSchoolNotifier:
         """Установка admin_chat_id при первом запуске"""
         if not self.config_manager.config["admin_chat_id"]:
             logger.info(
-                "Admin chat ID не установлен, будет установлен при первом сообщении"
+                "Admin chat ID не установлен, "
+                "будет установлен при первом сообщении"
             )
 
     def get_main_menu_keyboard(self):
@@ -1020,7 +1109,9 @@ class TelegramSchoolNotifier:
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-    def get_campuses_keyboard(self, campuses: List[Dict]) -> ReplyKeyboardMarkup:
+    def get_campuses_keyboard(
+        self, campuses: List[Dict]
+    ) -> ReplyKeyboardMarkup:
         """Создает клавиатуру с кампусами"""
         keyboard = []
         current_row = []
@@ -1048,8 +1139,10 @@ class TelegramSchoolNotifier:
         if not self.config_manager.config["admin_chat_id"]:
             self.config_manager.update_setting("admin_chat_id", chat_id)
             await update.message.reply_text(
-                "👋 Добро пожаловать! Вы установлены как администратор бота.\n\n"
-                "Пожалуйста, настройте параметры для работы с платформой 21-school.",
+                "👋 Добро пожаловать! "
+                "Вы установлены как администратор бота.\n\n"
+                "Пожалуйста, настройте параметры для работы с платформой "
+                "21-school.",
                 reply_markup=self.get_main_menu_keyboard(),
             )
         else:
@@ -1066,7 +1159,9 @@ class TelegramSchoolNotifier:
 
         return BotStates.MAIN_MENU
 
-    async def main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def main_menu(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Главное меню"""
         chat_id = str(update.effective_chat.id)
         if chat_id != self.config_manager.config["admin_chat_id"]:
@@ -1101,7 +1196,9 @@ class TelegramSchoolNotifier:
 
         return BotStates.MAIN_MENU
 
-    async def settings_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def settings_menu(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Меню настроек"""
         chat_id = str(update.effective_chat.id)
         if chat_id != self.config_manager.config["admin_chat_id"]:
@@ -1140,18 +1237,23 @@ class TelegramSchoolNotifier:
 
         return BotStates.MAIN_MENU
 
-    async def set_login(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def set_login(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Установка логина"""
         login = update.message.text.strip()
         self.config_manager.update_setting("platform_login", login)
 
         await update.message.reply_text(
-            f"✅ Логин установлен: {login}", reply_markup=self.get_settings_keyboard()
+            f"✅ Логин установлен: {login}",
+            reply_markup=self.get_settings_keyboard(),
         )
 
         return BotStates.MAIN_MENU
 
-    async def set_password(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def set_password(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Установка пароля"""
         password = update.message.text.strip()
         self.config_manager.update_setting("platform_password", password)
@@ -1162,7 +1264,9 @@ class TelegramSchoolNotifier:
 
         return BotStates.MAIN_MENU
 
-    async def select_campus(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def select_campus(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Выбор кампуса из списка"""
         chat_id = str(update.effective_chat.id)
         if chat_id != self.config_manager.config["admin_chat_id"]:
@@ -1238,7 +1342,8 @@ class TelegramSchoolNotifier:
 
         if selected_campus_name == "🔙 Назад к настройкам":
             await update.message.reply_text(
-                "Возвращаюсь к настройкам:", reply_markup=self.get_settings_keyboard()
+                "Возвращаюсь к настройкам:",
+                reply_markup=self.get_settings_keyboard(),
             )
             context.user_data["awaiting_campus_selection"] = False
             logger.info("Пользователь вернулся к настройкам")
@@ -1262,7 +1367,9 @@ class TelegramSchoolNotifier:
             for campus in campuses:
                 if selected_campus_name in campus["fullName"]:
                     selected_campus = campus
-                    logger.info(f"Найдено частичное совпадение: {campus['fullName']}")
+                    logger.info(
+                        f"Найдено частичное совпадение: {campus['fullName']}"
+                    )
                     break
 
         # Если все еще не нашли, ищем по короткому имени
@@ -1275,13 +1382,16 @@ class TelegramSchoolNotifier:
 
         if selected_campus:
             # Сохраняем выбранный кампус
-            self.config_manager.update_setting("school_id", selected_campus["id"])
+            self.config_manager.update_setting(
+                "school_id", selected_campus["id"]
+            )
             self.config_manager.update_setting(
                 "campus_name", selected_campus["fullName"]
             )
 
             logger.info(
-                f"Кампус сохранен: ID={selected_campus['id']}, Name={selected_campus['fullName']}"
+                f'Кампус сохранен: ID={selected_campus['id']}, "'
+                f'f"Name={selected_campus['fullName']}'
             )
 
             await update.message.reply_text(
@@ -1301,7 +1411,9 @@ class TelegramSchoolNotifier:
         # Сбрасываем флаг ожидания выбора кампуса
         context.user_data["awaiting_campus_selection"] = False
 
-    async def show_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def show_settings(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Показать текущие настройки"""
         config = self.config_manager.config
         is_complete, missing = self.config_manager.get_config_status()
@@ -1383,7 +1495,9 @@ class TelegramSchoolNotifier:
 
         logger.info(f"Мониторинг запущен для кампуса: {campus_name}")
 
-    async def stop_monitoring(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def stop_monitoring(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Остановка мониторинга"""
         chat_id = str(update.effective_chat.id)
         if chat_id != self.config_manager.config["admin_chat_id"]:
@@ -1402,7 +1516,9 @@ class TelegramSchoolNotifier:
         await update.message.reply_text("🛑 Мониторинг остановлен!")
         logger.info("Мониторинг остановлен")
 
-    async def test_auth(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def test_auth(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Тестирование авторизации"""
         chat_id = str(update.effective_chat.id)
         if chat_id != self.config_manager.config["admin_chat_id"]:
@@ -1421,7 +1537,9 @@ class TelegramSchoolNotifier:
 
             current_campus = self.config_manager.config["campus_name"]
             campus_info = (
-                f"\n🏫 Текущий кампус: {current_campus}" if current_campus else ""
+                f"\n🏫 Текущий кампус: {current_campus}"
+                if current_campus
+                else ""
             )
 
             await update.message.reply_text(
@@ -1434,7 +1552,9 @@ class TelegramSchoolNotifier:
             if campuses and current_campus:
                 # Показываем доступные кампусы
                 campuses_text = "📋 Доступные кампусы:\n"
-                for i, campus in enumerate(campuses[:10], 1):  # Ограничим вывод
+                for i, campus in enumerate(
+                    campuses[:10], 1
+                ):  # Ограничим вывод
                     campuses_text += f"{i}. {campus['fullName']}\n"
 
                 if len(campuses) > 10:
@@ -1449,7 +1569,9 @@ class TelegramSchoolNotifier:
                 "• Доступ к платформе 21-school"
             )
 
-    async def reset_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def reset_settings(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         """Сброс настроек"""
         chat_id = str(update.effective_chat.id)
         if chat_id != self.config_manager.config["admin_chat_id"]:
@@ -1548,7 +1670,9 @@ class TelegramSchoolNotifier:
             new_notifications = self.platform_manager.get_new_notifications()
 
             if new_notifications:
-                logger.info(f"Найдено {len(new_notifications)} новых уведомлений")
+                logger.info(
+                    f"Найдено {len(new_notifications)} новых уведомлений"
+                )
 
                 for notification in new_notifications:
                     await self.send_notification(notification)
@@ -1575,16 +1699,22 @@ class TelegramSchoolNotifier:
                         text=message_text,
                         parse_mode="MarkdownV2",
                     )
-                    logger.info(f"Уведомление отправлено: {notification['id']}")
+                    logger.info(
+                        f"Уведомление отправлено: {notification['id']}"
+                    )
                 except Exception as markdown_error:
                     logger.warning(
                         f"MarkdownV2 не сработал, пробуем HTML: {markdown_error}"
                     )
                     # Пробуем HTML разметку
                     try:
-                        html_message = self.format_notification_html(notification)
+                        html_message = self.format_notification_html(
+                            notification
+                        )
                         await self.application.bot.send_message(
-                            chat_id=admin_chat_id, text=html_message, parse_mode="HTML"
+                            chat_id=admin_chat_id,
+                            text=html_message,
+                            parse_mode="HTML",
                         )
                         logger.info(
                             f"Уведомление отправлено в HTML: {notification['id']}"
@@ -1594,12 +1724,17 @@ class TelegramSchoolNotifier:
                             f"HTML не сработал, отправляем без форматирования: {html_error}"
                         )
                         # Отправляем без форматирования
-                        plain_message = self.format_notification_plain(notification)
+                        plain_message = self.format_notification_plain(
+                            notification
+                        )
                         await self.application.bot.send_message(
-                            chat_id=admin_chat_id, text=plain_message, parse_mode=None
+                            chat_id=admin_chat_id,
+                            text=plain_message,
+                            parse_mode=None,
                         )
                         logger.info(
-                            f"Уведомление отправлено без форматирования: {notification['id']}"
+                            f"Уведомление отправлено без форматирования: "
+                            f"{notification['id']}"
                         )
 
         except Exception as e:
@@ -1645,14 +1780,18 @@ class TelegramSchoolNotifier:
             )
             return
 
-        await update.message.reply_text("🔍 Запрашиваю последнее уведомление...")
+        await update.message.reply_text(
+            "🔍 Запрашиваю последнее уведомление..."
+        )
 
         try:
             last_notification = self.platform_manager.get_last_notification()
 
             if last_notification:
                 # Используем универсальный метод отправки
-                message_text = self.format_notification_message(last_notification)
+                message_text = self.format_notification_message(
+                    last_notification
+                )
 
                 try:
                     await update.message.reply_text(
@@ -1666,12 +1805,15 @@ class TelegramSchoolNotifier:
                         f"Ошибка отправки последнего уведомления с Markdown: {e}"
                     )
                     # Пробуем отправить без форматирования
-                    plain_text = self.format_notification_plain(last_notification, 0)
+                    plain_text = self.format_notification_plain(
+                        last_notification, 0
+                    )
                     await update.message.reply_text(plain_text)
             else:
                 await update.message.reply_text(
                     "📭 Уведомлений нет.\n"
-                    "Когда появятся новые уведомления, они будут отображаться здесь."
+                    "Когда появятся новые уведомления, "
+                    "они будут отображаться здесь."
                 )
 
         except Exception as e:
@@ -1718,7 +1860,12 @@ class TelegramSchoolNotifier:
         except Exception as e:
             logger.error(f"Ошибка форматирования сообщения: {e}")
             # Возвращаем простой текст в случае ошибки
-            return f"🔔 Новое уведомление\n\nВремя: {notification.get('time', 'Неизвестно')}\nТип: {notification.get('groupName', 'Неизвестно')}\n\nСообщение: {notification.get('message', '')}"
+            return (
+                f"🔔 Новое уведомление\n\n"
+                f"Время: {notification.get('time', 'Неизвестно')}\n"
+                f"Тип: {notification.get('groupName', 'Неизвестно')}\n\n"
+                f"Сообщение: {notification.get('message', '')}"
+            )
 
     def escape_markdown(self, text: str) -> str:
         """Экранирование специальных символов Markdown"""
@@ -1740,16 +1887,24 @@ class TelegramSchoolNotifier:
     def run(self):
         """Синхронный запуск бота"""
         # Создаем приложение Telegram
-        self.application = Application.builder().token(self.telegram_token).build()
+        self.application = (
+            Application.builder().token(self.telegram_token).build()
+        )
 
         # Добавляем обработчики команд
-        self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(
+            CommandHandler("start", self.start_command)
+        )
         self.application.add_handler(CommandHandler("stop", self.stop_command))
-        self.application.add_handler(CommandHandler("status", self.status_command))
+        self.application.add_handler(
+            CommandHandler("status", self.status_command)
+        )
 
         # Добавляем обработчики для кнопок главного меню
         self.application.add_handler(
-            MessageHandler(filters.Regex("^⚙️ Настройки$"), self.open_settings_menu)
+            MessageHandler(
+                filters.Regex("^⚙️ Настройки$"), self.open_settings_menu
+            )
         )
         self.application.add_handler(
             MessageHandler(filters.Regex("^📊 Статус$"), self.status_command)
@@ -1761,15 +1916,21 @@ class TelegramSchoolNotifier:
             MessageHandler(filters.Regex("^⏹️ Остановка$"), self.stop_command)
         )
         self.application.add_handler(
-            MessageHandler(filters.Regex("^🔐 Тест авторизации$"), self.test_auth)
+            MessageHandler(
+                filters.Regex("^🔐 Тест авторизации$"), self.test_auth
+            )
         )
         self.application.add_handler(
-            MessageHandler(filters.Regex("^🔄 Сброс настроек$"), self.reset_settings)
+            MessageHandler(
+                filters.Regex("^🔄 Сброс настроек$"), self.reset_settings
+            )
         )
 
         # Добавляем обработчики для кнопок настроек
         self.application.add_handler(
-            MessageHandler(filters.Regex("^👤 Установить логин$"), self.request_login)
+            MessageHandler(
+                filters.Regex("^👤 Установить логин$"), self.request_login
+            )
         )
         self.application.add_handler(
             MessageHandler(
@@ -1777,7 +1938,9 @@ class TelegramSchoolNotifier:
             )
         )
         self.application.add_handler(
-            MessageHandler(filters.Regex("^🏫 Выбрать кампус$"), self.select_campus)
+            MessageHandler(
+                filters.Regex("^🏫 Выбрать кампус$"), self.select_campus
+            )
         )
         self.application.add_handler(
             MessageHandler(
@@ -1785,7 +1948,9 @@ class TelegramSchoolNotifier:
             )
         )
         self.application.add_handler(
-            MessageHandler(filters.Regex("^🔙 Главное меню$"), self.back_to_main_menu)
+            MessageHandler(
+                filters.Regex("^🔙 Главное меню$"), self.back_to_main_menu
+            )
         )
         self.application.add_handler(
             MessageHandler(
@@ -1796,57 +1961,14 @@ class TelegramSchoolNotifier:
 
         # Обработчик для текстовых сообщений (для ввода логина, пароля)
         self.application.add_handler(
-            MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text_input)
+            MessageHandler(
+                filters.TEXT & ~filters.COMMAND, self.handle_text_input
+            )
         )
 
         # Запускаем бота
         logger.info("Запуск Telegram бота...")
         self.application.run_polling()
-
-
-def clean_html(self, text: str) -> str:
-    """Очистка HTML тегов из текста с сохранением читаемости"""
-    if not text:
-        return ""
-
-    import re
-
-    # Заменяем HTML теги на простой текст
-    replacements = {
-        r"<br\s*/?>": "\n",
-        r"<p>": "\n",
-        r"</p>": "\n",
-        r"<b>": "*",
-        r"</b>": "*",
-        r"<strong>": "*",
-        r"</strong>": "*",
-        r"<i>": "_",
-        r"</i>": "_",
-        r"<em>": "_",
-        r"</em>": "_",
-        r"<code>": "`",
-        r"</code>": "`",
-        r"<pre>": "```\n",
-        r"</pre>": "\n```",
-        r"&nbsp;": " ",
-        r"&amp;": "&",
-        r"&lt;": "<",
-        r"&gt;": ">",
-        r"&quot;": '"',
-    }
-
-    cleaned_text = text
-    for pattern, replacement in replacements.items():
-        cleaned_text = re.sub(pattern, replacement, cleaned_text, flags=re.IGNORECASE)
-
-    # Удаляем оставшиеся HTML теги
-    cleaned_text = re.sub(r"<[^>]+>", "", cleaned_text)
-
-    # Убираем лишние переносы строк
-    cleaned_text = re.sub(r"\n\s*\n", "\n\n", cleaned_text)
-    cleaned_text = cleaned_text.strip()
-
-    return cleaned_text
 
 
 def main():
