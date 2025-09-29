@@ -5,8 +5,8 @@ import asyncio
 import json
 import logging
 import os
-import sys
 import pickle
+import sys
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
@@ -1568,31 +1568,43 @@ class TelegramSchoolNotifier:
 
             admin_chat_id = self.config_manager.config["admin_chat_id"]
             if admin_chat_id:
-                await self.application.bot.send_message(
-                    chat_id=admin_chat_id, text=message_text, parse_mode="MarkdownV2"
-                )
-                logger.info(f"Уведомление отправлено: {notification['id']}")
+                # Пробуем отправить с MarkdownV2
+                try:
+                    await self.application.bot.send_message(
+                        chat_id=admin_chat_id,
+                        text=message_text,
+                        parse_mode="MarkdownV2",
+                    )
+                    logger.info(f"Уведомление отправлено: {notification['id']}")
+                except Exception as markdown_error:
+                    logger.warning(
+                        f"MarkdownV2 не сработал, пробуем HTML: {markdown_error}"
+                    )
+                    # Пробуем HTML разметку
+                    try:
+                        html_message = self.format_notification_html(notification)
+                        await self.application.bot.send_message(
+                            chat_id=admin_chat_id, text=html_message, parse_mode="HTML"
+                        )
+                        logger.info(
+                            f"Уведомление отправлено в HTML: {notification['id']}"
+                        )
+                    except Exception as html_error:
+                        logger.warning(
+                            f"HTML не сработал, отправляем без форматирования: {html_error}"
+                        )
+                        # Отправляем без форматирования
+                        plain_message = self.format_notification_plain(notification)
+                        await self.application.bot.send_message(
+                            chat_id=admin_chat_id, text=plain_message, parse_mode=None
+                        )
+                        logger.info(
+                            f"Уведомление отправлено без форматирования: {notification['id']}"
+                        )
 
         except Exception as e:
             logger.error(f"Ошибка отправки уведомления: {e}")
-
-            # Попробуем отправить без форматирования
-            try:
-                admin_chat_id = self.config_manager.config["admin_chat_id"]
-                if admin_chat_id:
-                    plain_message = f"🔔 Новое уведомление\n\nВремя: {notification.get('time', 'Неизвестно')}\nТип: {notification.get('groupName', 'Неизвестно')}\n\nСообщение: {self.clean_html(notification.get('message', ''))}"
-
-                    await self.application.bot.send_message(
-                        chat_id=admin_chat_id,
-                        text=plain_message,
-                        parse_mode=None,  # Без форматирования
-                    )
-                    logger.info(
-                        f"Уведомление отправлено без форматирования: {notification['id']}"
-                    )
-            except Exception as e2:
-                logger.error(f"Ошибка отправки уведомления без форматирования: {e2}")
-                self.stats["errors"] += 1
+            self.stats["errors"] += 1
 
     def clean_html(self, text: str) -> str:
         """Очистка HTML тегов из текста"""
@@ -1671,6 +1683,59 @@ class TelegramSchoolNotifier:
                 "• Выбор кампуса\n"
                 "• Интернет-соединение"
             )
+
+    def format_notification_message(self, notification: Dict) -> str:
+        """Форматирование сообщения об уведомлении с правильным экранированием"""
+        try:
+            time_str = datetime.fromisoformat(
+                notification["time"].replace("Z", "+00:00")
+            ).strftime("%d.%m.%Y %H:%M")
+            message_text = self.clean_html(notification["message"])
+
+            # Экранируем все текстовые поля
+            escaped_time = self.escape_markdown(time_str)
+            escaped_type = self.escape_markdown(
+                notification.get("groupName", "Неизвестно")
+            )
+            escaped_message = self.escape_markdown(message_text)
+            escaped_id = self.escape_markdown(notification["id"])
+
+            # Форматируем сообщение с использованием MarkdownV2
+            formatted_message = f"""
+    🔔 *Новое уведомление* 🔔
+
+    📅 *Время:* {escaped_time}
+    📋 *Тип:* {escaped_type}
+
+    💬 *Сообщение:*
+    {escaped_message}
+
+    🆔 *ID:* `{escaped_id}`
+            """
+
+            return formatted_message.strip()
+
+        except Exception as e:
+            logger.error(f"Ошибка форматирования сообщения: {e}")
+            # Возвращаем простой текст в случае ошибки
+            return f"🔔 Новое уведомление\n\nВремя: {notification.get('time', 'Неизвестно')}\nТип: {notification.get('groupName', 'Неизвестно')}\n\nСообщение: {notification.get('message', '')}"
+
+    def escape_markdown(self, text: str) -> str:
+        """Экранирование специальных символов Markdown"""
+        if not text:
+            return ""
+
+        # Символы, которые нужно экранировать в MarkdownV2
+        escape_chars = r"_*[]()~`>#+-=|{}.!"
+        escaped_text = ""
+
+        for char in text:
+            if char in escape_chars:
+                escaped_text += "\\" + char
+            else:
+                escaped_text += char
+
+        return escaped_text
 
     def run(self):
         """Синхронный запуск бота"""
@@ -1782,59 +1847,6 @@ def clean_html(self, text: str) -> str:
     cleaned_text = cleaned_text.strip()
 
     return cleaned_text
-
-
-def escape_markdown(self, text: str) -> str:
-    """Экранирование специальных символов Markdown"""
-    if not text:
-        return ""
-
-    # Символы, которые нужно экранировать в MarkdownV2
-    escape_chars = r"_*[]()~`>#+-=|{}.!"
-    escaped_text = ""
-
-    for char in text:
-        if char in escape_chars:
-            escaped_text += "\\" + char
-        else:
-            escaped_text += char
-
-    return escaped_text
-
-
-def format_notification_message(self, notification: Dict) -> str:
-    """Форматирование сообщения об уведомлении"""
-    try:
-        time_str = datetime.fromisoformat(
-            notification["time"].replace("Z", "+00:00")
-        ).strftime("%d.%m.%Y %H:%M")
-        message_text = self.clean_html(notification["message"])
-
-        # Экранируем все текстовые поля
-        escaped_time = self.escape_markdown(time_str)
-        escaped_type = self.escape_markdown(notification.get("groupName", "Неизвестно"))
-        escaped_message = self.escape_markdown(message_text)
-        escaped_id = self.escape_markdown(notification["id"])
-
-        # Форматируем сообщение с использованием MarkdownV2
-        formatted_message = f"""
-🔔 *Новое уведомление* 🔔
-
-📅 *Время:* {escaped_time}
-📋 *Тип:* {escaped_type}
-
-💬 *Сообщение:*
-{escaped_message}
-
-🆔 *ID:* `{escaped_id}`
-        """
-
-        return formatted_message.strip()
-
-    except Exception as e:
-        logger.error(f"Ошибка форматирования сообщения: {e}")
-        # Возвращаем простой текст в случае ошибки
-        return f"🔔 Новое уведомление\n\nВремя: {notification.get('time', 'Неизвестно')}\nТип: {notification.get('groupName', 'Неизвестно')}\n\nСообщение: {notification.get('message', '')}"
 
 
 def main():
