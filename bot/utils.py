@@ -2,8 +2,7 @@
 
 import re
 from datetime import datetime
-
-import pytz
+from zoneinfo import ZoneInfo
 
 
 def clean_html(text: str) -> str:
@@ -30,22 +29,19 @@ def escape_markdown(text: str) -> str:
 
 
 def convert_utc_to_local(utc_time_str: str, timezone_str: str) -> str:
-    """Преобразует время UTC в локальный часовой пояс (переместили из telegram_bot.py для reuse)"""
+    """Преобразует время UTC в локальный часовой пояс"""
     try:
-        # Парсим время UTC
         utc_time = datetime.fromisoformat(utc_time_str.replace("Z", "+00:00"))
-        # Создаем объект часового пояса
-        local_tz = pytz.timezone(timezone_str)
-        # Преобразуем время
+        local_tz = ZoneInfo(timezone_str)
         local_time = utc_time.astimezone(local_tz)
-        # Форматируем в читаемый вид
         return local_time.strftime("%d.%m.%Y %H:%M (%Z)")
-    except Exception as e:
-        # Fallback на UTC при ошибке
+    except ValueError as e:
         return (
-            # В случае ошибки возвращаем оригинальное время
             utc_time_str.replace("T", " ").replace("Z", " UTC")
-            + " (ошибка пояса: "
-            + str(e)
-            + ")"
+            + f" (ошибка времени: {e})"
+        )
+    except ZoneInfo.InvalidTimeZone as e:
+        return (
+            utc_time_str.replace("T", " ").replace("Z", " UTC")
+            + f" (ошибка пояса: {e})"
         )
