@@ -2,7 +2,8 @@
 
 import re
 from datetime import datetime
-from typing import Dict
+
+import pytz
 
 
 def clean_html(text: str) -> str:
@@ -28,37 +29,23 @@ def escape_markdown(text: str) -> str:
     return escaped_text
 
 
-def format_notification_message(notification: Dict) -> str:
-    """Форматирование сообщения об уведомлении с правильным экранированием"""
+def convert_utc_to_local(utc_time_str: str, timezone_str: str) -> str:
+    """Преобразует время UTC в локальный часовой пояс (переместили из telegram_bot.py для reuse)"""
     try:
-        time_str = datetime.fromisoformat(
-            notification["time"].replace("Z", "+00:00")
-        ).strftime("%d.%m.%Y %H:%M")
-        message_text = clean_html(notification["message"])
-
-        escaped_time = escape_markdown(time_str)
-        escaped_type = escape_markdown(
-            notification.get("groupName", "Неизвестно")
-        )
-        escaped_message = escape_markdown(message_text)
-        escaped_id = escape_markdown(notification["id"])
-
-        formatted_message = (
-            f"🔔 *Новое уведомление* 🔔\n"
-            f"📅 *Время:* {escaped_time}\n"
-            f"📋 *Тип:* {escaped_type}\n"
-            f"💬 *Сообщение:*\n"
-            f"{escaped_message}\n"
-            f"🆔 *ID:* `{escaped_id}`"
-        )
-
-        return formatted_message.strip()
-
+        # Парсим время UTC
+        utc_time = datetime.fromisoformat(utc_time_str.replace("Z", "+00:00"))
+        # Создаем объект часового пояса
+        local_tz = pytz.timezone(timezone_str)
+        # Преобразуем время
+        local_time = utc_time.astimezone(local_tz)
+        # Форматируем в читаемый вид
+        return local_time.strftime("%d.%m.%Y %H:%M (%Z)")
     except Exception as e:
+        # Fallback на UTC при ошибке
         return (
-            f"🔔 Новое уведомление\n\n"
-            f"{e}\n"
-            f"Время: {notification.get('time', 'Неизвестно')}\n"
-            f"Тип: {notification.get('groupName', 'Неизвестно')}\n\n"
-            f"Сообщение: {notification.get('message', '')}"
+            # В случае ошибки возвращаем оригинальное время
+            utc_time_str.replace("T", " ").replace("Z", " UTC")
+            + " (ошибка пояса: "
+            + str(e)
+            + ")"
         )

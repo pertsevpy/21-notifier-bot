@@ -41,6 +41,7 @@ class ConfigManager:
             "admin_chat_id": "",
             "is_configured": False,
             "last_update": None,
+            "timezone": "Europe/Moscow",
         }
 
     def save_config(self):

@@ -19,7 +19,7 @@ from telegram.ext import (
 
 from .config_manager import ConfigManager
 from .platform_manager import SchoolPlatformManager
-from .utils import format_notification_message, clean_html, escape_markdown
+from .utils import convert_utc_to_local, clean_html, escape_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -549,6 +549,7 @@ class TelegramSchoolNotifier:
             "admin_chat_id": admin_chat_id,
             "is_configured": False,
             "last_update": datetime.now(),
+            "timezone": "Europe/Moscow",
         }
         self.config_manager.save_config()
 
@@ -646,7 +647,7 @@ class TelegramSchoolNotifier:
     async def send_notification(self, notification: Dict):
         """Отправка уведомления в Telegram с правильным форматированием"""
         try:
-            message_text = format_notification_message(notification)
+            message_text = self.format_notification_message(notification)
 
             admin_chat_id = self.config_manager.config["admin_chat_id"]
             if admin_chat_id:
@@ -694,11 +695,51 @@ class TelegramSchoolNotifier:
             logger.error(f"Ошибка отправки уведомления: {e}")
             self.stats["errors"] += 1
 
+    def format_notification_message(self, notification: Dict) -> str:
+        """Форматирование сообщения об уведомлении с правильным экранированием
+        и конвертацией времени"""
+        try:
+            timezone_str = self.config_manager.config.get(
+                "timezone", "Europe/Moscow"
+            )
+            time_str = convert_utc_to_local(
+                notification["time"], timezone_str
+            )  # Используем из utils
+            message_text = clean_html(notification["message"])
+
+            escaped_time = escape_markdown(time_str)
+            escaped_type = escape_markdown(
+                notification.get("groupName", "Неизвестно")
+            )
+            escaped_message = escape_markdown(message_text)
+            escaped_id = escape_markdown(notification["id"])
+
+            formatted_message = (
+                f"🔔 *Новое уведомление* 🔔\n"
+                f"📅 *Время:* {escaped_time}\n"
+                f"📋 *Тип:* {escaped_type}\n"
+                f"💬 *Сообщение:*\n"
+                f"{escaped_message}\n"
+                f"🆔 *ID:* `{escaped_id}`"
+            )
+
+            return formatted_message.strip()
+
+        except Exception as e:
+            return (
+                f"🔔 Новое уведомление\n\n"
+                f"{e}\n"
+                f"Время: {notification.get('time', 'Неизвестно')}\n"
+                f"Тип: {notification.get('groupName', 'Неизвестно')}\n\n"
+                f"Сообщение: {notification.get('message', '')}"
+            )
+
     def format_notification_html(self, notification: Dict) -> str:
         """Форматирование сообщения в HTML"""
-        time_str = datetime.fromisoformat(
-            notification["time"].replace("Z", "+00:00")
-        ).strftime("%d.%m.%Y %H:%M")
+        timezone_str = self.config_manager.config.get(
+            "timezone", "Europe/Moscow"
+        )
+        time_str = convert_utc_to_local(notification["time"], timezone_str)
         message_text = clean_html(notification["message"])
 
         return (
@@ -711,9 +752,10 @@ class TelegramSchoolNotifier:
 
     def format_notification_plain(self, notification: Dict) -> str:
         """Форматирование сообщения без разметки"""
-        time_str = datetime.fromisoformat(
-            notification["time"].replace("Z", "+00:00")
-        ).strftime("%d.%m.%Y %H:%M")
+        timezone_str = self.config_manager.config.get(
+            "timezone", "Europe/Moscow"
+        )
+        time_str = convert_utc_to_local(notification["time"], timezone_str)
         message_text = clean_html(notification["message"])
 
         return (
@@ -756,7 +798,9 @@ class TelegramSchoolNotifier:
             last_notification = self.platform_manager.get_last_notification()
 
             if last_notification:
-                message_text = format_notification_message(last_notification)
+                message_text = self.format_notification_message(
+                    last_notification
+                )
 
                 try:
                     await update.message.reply_text(
