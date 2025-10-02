@@ -1,10 +1,12 @@
 """Логика Telegram-бота, включая обработчики команд и сообщений"""
 
+import asyncio
 import logging
+from datetime import datetime
 from enum import Enum
 from typing import Dict, List
-import asyncio
-from datetime import datetime
+from zoneinfo import available_timezones
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -77,7 +79,8 @@ class TelegramSchoolNotifier:
         """Клавиатура настроек"""
         keyboard = [
             ["👤 Установить логин", "🔑 Установить пароль"],
-            ["🏫 Выбрать кампус", "✅ Проверить настройки"],
+            ["🏫 Выбрать кампус", "⏰ Часовой пояс"],
+            ["✅ Проверить настройки"],
             ["🔙 Главное меню"],
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -102,6 +105,108 @@ class TelegramSchoolNotifier:
 
         keyboard.append(["🔙 Назад к настройкам"])
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+    def get_available_timezones(self) -> list[str]:
+        """Возвращает список доступных часовых поясов России"""
+        timezones = [
+            "Europe/Kaliningrad",  # UTC+2
+            "Europe/Moscow",  # UTC+3
+            "Europe/Samara",  # UTC+4
+            "Asia/Tashkent",  # UTC+5
+            "Asia/Yekaterinburg",  # UTC+5
+            "Asia/Omsk",  # UTC+6
+            "Asia/Novosibirsk",  # UTC+7
+            "Asia/Novokuznetsk",  # UTC+7
+            "Asia/Krasnoyarsk",  # UTC+7
+            "Asia/Irkutsk",  # UTC+8
+            "Asia/Chita",  # UTC+9
+            "Asia/Vladivostok",  # UTC+10
+            "Asia/Magadan",  # UTC+11
+            "Asia/Sakhalin",  # UTC+11
+            "Asia/Kamchatka",  # UTC+12
+            "Asia/Anadyr",  # UTC+12
+        ]
+        return [tz for tz in timezones if tz in available_timezones()]
+
+    def get_timezone_display_name(self, timezone: str) -> str:
+        """Возвращает понятное название пояса для UI"""
+        display_names = {
+            "Europe/Kaliningrad": "Калининград \n(UTC+2)",
+            "Europe/Moscow": "Москва \n(UTC+3)",
+            "Europe/Samara": "Самара \n(UTC+4)",
+            "Asia/Tashkent": "Ташкент \n(UTC+5)",
+            "Asia/Yekaterinburg": "Екатеринбург \n(UTC+5)",
+            "Asia/Omsk": "Омск \n(UTC+6)",
+            "Asia/Novosibirsk": "Новосибирск \n(UTC+7)",
+            "Asia/Novokuznetsk": "Новокузнецк \n(UTC+7)",
+            "Asia/Krasnoyarsk": "Красноярск \n(UTC+7)",
+            "Asia/Irkutsk": "Иркутск \n(UTC+8)",
+            "Asia/Chita": "Чита \n(UTC+9)",
+            "Asia/Vladivostok": "Владивосток \n(UTC+10)",
+            "Asia/Magadan": "Магадан \n(UTC+11)",
+            "Asia/Sakhalin": "Сахалин \n(UTC+11)",
+            "Asia/Kamchatka": "Камчатка \n(UTC+12)",
+            "Asia/Anadyr": "Анадырь \n(UTC+12)",
+        }
+        return display_names.get(timezone, timezone)
+
+    def get_available_timezones_keyboard(self) -> ReplyKeyboardMarkup:
+        """Клавиатура с доступными часовыми поясами России"""
+        timezones = self.get_available_timezones()
+        keyboard = [
+            [self.get_timezone_display_name(tz) for tz in timezones[i : i + 2]]
+            for i in range(0, len(timezones), 2)
+        ]
+        keyboard.append(["🔙 Назад к настройкам"])
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+    async def select_timezone(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        """Выбор часового пояса"""
+        chat_id = str(update.effective_chat.id)
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text("⛔ У вас нет прав")
+            return
+        current_tz = self.config_manager.config.get("timezone", "UTC")
+        await update.message.reply_text(
+            f"⏰ Текущий часовой пояс: {self.get_timezone_display_name(current_tz)}\nВыберите новый:",
+            reply_markup=self.get_available_timezones_keyboard(),
+        )
+        context.user_data["awaiting_timezone_selection"] = True
+
+    async def handle_timezone_selection(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        """Обработка выбора часового пояса"""
+        chat_id = str(update.effective_chat.id)
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text("⛔ У вас нет прав")
+            return
+        selected_display_name = update.message.text
+        if selected_display_name == "🔙 Назад к настройкам":
+            await update.message.reply_text(
+                "Возвращаюсь к настройкам:",
+                reply_markup=self.get_settings_keyboard(),
+            )
+        else:
+            display_names = {
+                self.get_timezone_display_name(tz): tz
+                for tz in self.get_available_timezones()
+            }
+            selected_tz = display_names.get(selected_display_name)
+            if selected_tz:
+                self.config_manager.update_setting("timezone", selected_tz)
+                await update.message.reply_text(
+                    f"✅ Часовой пояс установлен: {selected_display_name}",
+                    reply_markup=self.get_settings_keyboard(),
+                )
+            else:
+                await update.message.reply_text(
+                    "❌ Неверный пояс. Выберите из списка.",
+                    reply_markup=self.get_available_timezones_keyboard(),
+                )
+        context.user_data["awaiting_timezone_selection"] = False
 
     async def start_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -240,6 +345,14 @@ class TelegramSchoolNotifier:
             )
             context.user_data["awaiting_password"] = False
             logger.info("Пароль установлен")
+
+        if context.user_data.get("awaiting_timezone_selection"):
+            await self.handle_timezone_selection(update, context)
+        else:
+            await update.message.reply_text(
+                "Пожалуйста, используйте команды или выберите действие из меню.",
+                reply_markup=self.get_main_menu_keyboard(),
+            )
 
     async def select_campus(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -904,7 +1017,11 @@ class TelegramSchoolNotifier:
                 self.last_notification_command,
             )
         )
-
+        self.application.add_handler(
+            MessageHandler(
+                filters.Regex("^⏰ Часовой пояс$"), self.select_timezone
+            )
+        )
         self.application.add_handler(
             MessageHandler(
                 filters.TEXT & ~filters.COMMAND, self.handle_text_input

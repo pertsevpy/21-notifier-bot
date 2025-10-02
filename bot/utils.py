@@ -1,8 +1,11 @@
 """Вспомогательные функции для форматирования сообщений и очистки HTML"""
 
+import logging
 import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
 
 
 def clean_html(text: str) -> str:
@@ -30,18 +33,32 @@ def escape_markdown(text: str) -> str:
 
 def convert_utc_to_local(utc_time_str: str, timezone_str: str) -> str:
     """Преобразует время UTC в локальный часовой пояс"""
+    if not utc_time_str:
+        logger.warning("Empty UTC time string provided")
+        return "Unknown time"
+
+    default_tz = "UTC"
+    if not timezone_str:
+        logger.warning("Empty timezone provided, using UTC")
+        timezone_str = default_tz
+
     try:
         utc_time = datetime.fromisoformat(utc_time_str.replace("Z", "+00:00"))
         local_tz = ZoneInfo(timezone_str)
         local_time = utc_time.astimezone(local_tz)
         return local_time.strftime("%d.%m.%Y %H:%M (%Z)")
     except ValueError as e:
-        return (
-            utc_time_str.replace("T", " ").replace("Z", " UTC")
-            + f" (ошибка времени: {e})"
-        )
+        logger.error("Invalid time format: %s", e)
+        return f"{utc_time_str.replace('T', ' ').replace('Z', ' UTC')} (error: {e})"
     except ZoneInfo.InvalidTimeZone as e:
-        return (
-            utc_time_str.replace("T", " ").replace("Z", " UTC")
-            + f" (ошибка пояса: {e})"
-        )
+        logger.error("Invalid timezone: %s, falling back to UTC", e)
+        try:
+            utc_time = datetime.fromisoformat(
+                utc_time_str.replace("Z", "+00:00")
+            )
+            local_tz = ZoneInfo(default_tz)
+            local_time = utc_time.astimezone(local_tz)
+            return local_time.strftime("%d.%m.%Y %H:%M (%Z)")
+        except ValueError as ve:
+            logger.error("Failed to convert to UTC: %s", ve)
+            return f"{utc_time_str.replace('T', ' ').replace('Z', ' UTC')} (error: {ve})"
