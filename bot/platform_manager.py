@@ -751,7 +751,7 @@ class SchoolPlatformManager:
             if notifications:
                 last_notification = notifications[0]
                 logger.info(
-                    "Получено последнее уведомление: ", last_notification["id"]
+                    "Получено последнее уведомление: %s", last_notification["id"]
                 )
                 return last_notification
             else:
