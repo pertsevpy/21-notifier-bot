@@ -1,7 +1,9 @@
 """Логика Telegram-бота, включая обработчики команд и сообщений"""
 
 import asyncio
+import fcntl
 import logging
+from contextlib import contextmanager
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List
@@ -26,6 +28,24 @@ from .utils import convert_utc_to_local, clean_html, escape_markdown
 logger = logging.getLogger(__name__)
 
 
+@contextmanager
+def file_lock(lock_file: str):
+    """Контекстный менеджер для файловой блокировки"""
+    with open(lock_file, "w", encoding="UTF-8") as f:
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            yield
+        except IOError:
+            logger.error(
+                "Другой экземпляр бота уже запущен (lock file: %s)", lock_file
+            )
+            raise RuntimeError(
+                "Another instance of the bot is already running"
+            )
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
 class BotStates(Enum):
     """Состояния для ConversationHandler"""
 
@@ -40,8 +60,13 @@ class BotStates(Enum):
 class TelegramSchoolNotifier:
     """Telegram бот для уведомлений о событиях 21-school"""
 
-    def __init__(self, telegram_token: str):
+    def __init__(
+        self, telegram_token: str = None, lock_file: str = "bot.lock"
+    ):
         self.telegram_token = telegram_token
+        if not self.telegram_token:
+            raise ValueError("TELEGRAM_TOKEN не задан")
+        self.lock_file = lock_file
         self.config_manager = ConfigManager()
         self.platform_manager = SchoolPlatformManager(self.config_manager)
         self.scheduler = AsyncIOScheduler()
@@ -170,7 +195,9 @@ class TelegramSchoolNotifier:
             return
         current_tz = self.config_manager.config.get("timezone", "UTC")
         await update.message.reply_text(
-            f"⏰ Текущий часовой пояс: {self.get_timezone_display_name(current_tz)}\nВыберите новый:",
+            f"⏰ Текущий часовой пояс: "
+            f"{self.get_timezone_display_name(current_tz)}\n"
+            f"Выберите новый:",
             reply_markup=self.get_available_timezones_keyboard(),
         )
         context.user_data["awaiting_timezone_selection"] = True
@@ -450,7 +477,7 @@ class TelegramSchoolNotifier:
                 if selected_campus_name in campus["fullName"]:
                     selected_campus = campus
                     logger.info(
-                        f"Найдено частичное совпадение: {campus['fullName']}"
+                        "Найдено частичное совпадение: %s", campus["fullName"]
                     )
                     break
 
@@ -458,7 +485,9 @@ class TelegramSchoolNotifier:
             for campus in campuses:
                 if selected_campus_name == campus["shortName"]:
                     selected_campus = campus
-                    logger.info(f"Найдено по shortName: {campus['shortName']}")
+                    logger.info(
+                        "Найдено по shortName: %s", campus["shortName"]
+                    )
                     break
 
         if selected_campus:
@@ -716,7 +745,7 @@ class TelegramSchoolNotifier:
                 return False
 
         except Exception as e:
-            logger.error(f"Критическая ошибка при авторизации: {e}")
+            logger.error("Критическая ошибка при авторизации: %s", e)
             self.stats["errors"] += 1
             return False
 
@@ -754,7 +783,7 @@ class TelegramSchoolNotifier:
                 logger.info("Новых уведомлений нет")
 
         except Exception as e:
-            logger.error(f"Ошибка при проверке уведомлений: {e}")
+            logger.error("Ошибка при проверке уведомлений: %s", e)
             self.stats["errors"] += 1
 
     async def send_notification(self, notification: Dict):
@@ -775,7 +804,8 @@ class TelegramSchoolNotifier:
                     )
                 except Exception as markdown_error:
                     logger.warning(
-                        f"MarkdownV2 не сработал, пробуем HTML: {markdown_error}"
+                        "MarkdownV2 не сработал, пробуем HTML: %s",
+                        markdown_error,
                     )
                     html_message = self.format_notification_html(notification)
                     try:
@@ -785,11 +815,13 @@ class TelegramSchoolNotifier:
                             parse_mode="HTML",
                         )
                         logger.info(
-                            f"Уведомление отправлено в HTML: {notification['id']}"
+                            "Уведомление отправлено в HTML: %s",
+                            notification["id"],
                         )
                     except Exception as html_error:
                         logger.warning(
-                            f"HTML не сработал, отправляем без форматирования: {html_error}"
+                            "HTML не сработал, отправляем без форматирования: %s",
+                            html_error,
                         )
                         plain_message = self.format_notification_plain(
                             notification
@@ -805,7 +837,7 @@ class TelegramSchoolNotifier:
                         )
 
         except Exception as e:
-            logger.error(f"Ошибка отправки уведомления: {e}")
+            logger.error("Ошибка отправки уведомления: %s", e)
             self.stats["errors"] += 1
 
     def format_notification_message(self, notification: Dict) -> str:
@@ -920,11 +952,13 @@ class TelegramSchoolNotifier:
                         text=message_text, parse_mode="MarkdownV2"
                     )
                     logger.info(
-                        f"Последнее уведомление отправлено: {last_notification['id']}"
+                        "Последнее уведомление отправлено: %s",
+                        last_notification["id"],
                     )
                 except Exception as e:
                     logger.error(
-                        f"Ошибка отправки последнего уведомления с Markdown: {e}"
+                        "Ошибка отправки последнего уведомления с Markdown: %s",
+                        e,
                     )
                     plain_text = self.format_notification_plain(
                         last_notification
@@ -938,7 +972,7 @@ class TelegramSchoolNotifier:
                 )
 
         except Exception as e:
-            logger.error(f"Ошибка при получении последнего уведомления: {e}")
+            logger.error("Ошибка при получении последнего уведомления: %s", e)
             await update.message.reply_text(
                 "❌ Ошибка при получении уведомления.\n"
                 "Проверьте:\n"
@@ -949,84 +983,104 @@ class TelegramSchoolNotifier:
 
     def run(self):
         """Синхронный запуск бота"""
-        self.application = (
-            Application.builder().token(self.telegram_token).build()
-        )
+        try:
+            with file_lock(self.lock_file):
+                self.application = (
+                    Application.builder().token(self.telegram_token).build()
+                )
 
-        self.application.add_handler(
-            CommandHandler("start", self.start_command)
-        )
-        self.application.add_handler(CommandHandler("stop", self.stop_command))
-        self.application.add_handler(
-            CommandHandler("status", self.status_command)
-        )
+                self.application.add_handler(
+                    CommandHandler("start", self.start_command)
+                )
+                self.application.add_handler(
+                    CommandHandler("stop", self.stop_command)
+                )
+                self.application.add_handler(
+                    CommandHandler("status", self.status_command)
+                )
 
-        self.application.add_handler(
-            MessageHandler(
-                filters.Regex("^⚙️ Настройки$"), self.open_settings_menu
-            )
-        )
-        self.application.add_handler(
-            MessageHandler(filters.Regex("^📊 Статус$"), self.status_command)
-        )
-        self.application.add_handler(
-            MessageHandler(filters.Regex("^▶️ Запуск$"), self.start_monitoring)
-        )
-        self.application.add_handler(
-            MessageHandler(filters.Regex("^⏹️ Остановка$"), self.stop_command)
-        )
-        self.application.add_handler(
-            MessageHandler(
-                filters.Regex("^🔐 Тест авторизации$"), self.test_auth
-            )
-        )
-        self.application.add_handler(
-            MessageHandler(
-                filters.Regex("^🔄 Сброс настроек$"), self.reset_settings
-            )
-        )
+                self.application.add_handler(
+                    MessageHandler(
+                        filters.Regex("^⚙️ Настройки$"), self.open_settings_menu
+                    )
+                )
+                self.application.add_handler(
+                    MessageHandler(
+                        filters.Regex("^📊 Статус$"), self.status_command
+                    )
+                )
+                self.application.add_handler(
+                    MessageHandler(
+                        filters.Regex("^▶️ Запуск$"), self.start_monitoring
+                    )
+                )
+                self.application.add_handler(
+                    MessageHandler(
+                        filters.Regex("^⏹️ Остановка$"), self.stop_command
+                    )
+                )
+                self.application.add_handler(
+                    MessageHandler(
+                        filters.Regex("^🔐 Тест авторизации$"), self.test_auth
+                    )
+                )
+                self.application.add_handler(
+                    MessageHandler(
+                        filters.Regex("^🔄 Сброс настроек$"),
+                        self.reset_settings,
+                    )
+                )
 
-        self.application.add_handler(
-            MessageHandler(
-                filters.Regex("^👤 Установить логин$"), self.request_login
-            )
-        )
-        self.application.add_handler(
-            MessageHandler(
-                filters.Regex("^🔑 Установить пароль$"), self.request_password
-            )
-        )
-        self.application.add_handler(
-            MessageHandler(
-                filters.Regex("^🏫 Выбрать кампус$"), self.select_campus
-            )
-        )
-        self.application.add_handler(
-            MessageHandler(
-                filters.Regex("^✅ Проверить настройки$"), self.show_settings
-            )
-        )
-        self.application.add_handler(
-            MessageHandler(
-                filters.Regex("^🔙 Главное меню$"), self.back_to_main_menu
-            )
-        )
-        self.application.add_handler(
-            MessageHandler(
-                filters.Regex("^🔔 Последнее уведомление$"),
-                self.last_notification_command,
-            )
-        )
-        self.application.add_handler(
-            MessageHandler(
-                filters.Regex("^⏰ Часовой пояс$"), self.select_timezone
-            )
-        )
-        self.application.add_handler(
-            MessageHandler(
-                filters.TEXT & ~filters.COMMAND, self.handle_text_input
-            )
-        )
+                self.application.add_handler(
+                    MessageHandler(
+                        filters.Regex("^👤 Установить логин$"),
+                        self.request_login,
+                    )
+                )
+                self.application.add_handler(
+                    MessageHandler(
+                        filters.Regex("^🔑 Установить пароль$"),
+                        self.request_password,
+                    )
+                )
+                self.application.add_handler(
+                    MessageHandler(
+                        filters.Regex("^🏫 Выбрать кампус$"),
+                        self.select_campus,
+                    )
+                )
+                self.application.add_handler(
+                    MessageHandler(
+                        filters.Regex("^✅ Проверить настройки$"),
+                        self.show_settings,
+                    )
+                )
+                self.application.add_handler(
+                    MessageHandler(
+                        filters.Regex("^🔙 Главное меню$"),
+                        self.back_to_main_menu,
+                    )
+                )
+                self.application.add_handler(
+                    MessageHandler(
+                        filters.Regex("^🔔 Последнее уведомление$"),
+                        self.last_notification_command,
+                    )
+                )
+                self.application.add_handler(
+                    MessageHandler(
+                        filters.Regex("^⏰ Часовой пояс$"),
+                        self.select_timezone,
+                    )
+                )
+                self.application.add_handler(
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND, self.handle_text_input
+                    )
+                )
 
-        logger.info("Запуск Telegram бота...")
-        self.application.run_polling()
+                logger.info("Запуск Telegram бота...")
+                self.application.run_polling()
+        except RuntimeError as e:
+            logger.error("Ошибка запуска бота: %s", e)
+            raise
