@@ -208,3 +208,6 @@ __marimo__/
 
 # IntelliJ IDEA
 .idea/
+
+*.pkl
+bot_config.json

@@ -1,10 +1,11 @@
 """Управление конфигурацией бота (чтение/запись настроек)"""
 
+import json
 import logging
 import os
-import pickle
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple, List
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -12,27 +13,40 @@ logger = logging.getLogger(__name__)
 class ConfigManager:
     """Менеджер конфигурации с сохранением в файл"""
 
-    def __init__(self, config_file: str = "bot_config.pkl"):
+    def __init__(self, config_file: str = "bot_config.json"):
         self.config_file = config_file
         self.config = self.load_config()
 
     def load_config(self) -> Dict:
-        """Загрузка конфигурации из файла"""
+        """Загружает конфигурацию из JSON файла"""
         try:
             if os.path.exists(self.config_file):
-                with open(self.config_file, "rb") as f:
-                    return pickle.load(f)
-        except (
-            pickle.UnpicklingError,
-            EOFError,
-            AttributeError,
-            ImportError,
-        ) as e:
+                with open(self.config_file, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                    # Валидация структуры конфига
+                    required_keys = [
+                        "platform_login",
+                        "platform_password",
+                        "school_id",
+                        "campus_name",
+                        "admin_chat_id",
+                        "is_configured",
+                        "last_update",
+                        "timezone",
+                    ]
+                    if not all(key in config for key in required_keys):
+                        logger.error(
+                            "Неверная структура конфигурации, возвращаем дефолт"
+                        )
+                        return self.get_default_config()
+                    return config
+        except (json.JSONDecodeError, OSError) as e:
             logger.error("Ошибка загрузки конфигурации: %s", e)
-        except OSError as e:  # Ошибки файловой системы
-            logger.error("Ошибка доступа к файлу конфигурации: %s", e)
+        return self.get_default_config()
 
-        # Конфигурация по умолчанию
+    @staticmethod
+    def get_default_config() -> Dict:
+        """Возвращает дефолтную конфигурацию"""
         return {
             "platform_login": "",
             "platform_password": "",
@@ -41,24 +55,27 @@ class ConfigManager:
             "admin_chat_id": "",
             "is_configured": False,
             "last_update": None,
-            "timezone": "Europe/Moscow",
+            "timezone": "UTC+3",
         }
 
     def save_config(self):
-        """Сохранение конфигурации в файл"""
+        """Сохраняет конфигурацию в JSON файл"""
         try:
-            self.config["last_update"] = datetime.now()
-            with open(self.config_file, "wb") as f:
-                # noinspection PyTypeChecker
-                pickle.dump(self.config, f)
+            self.config["last_update"] = datetime.now().isoformat()
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                json.dump(self.config, f, indent=2, ensure_ascii=False)
             logger.info("Конфигурация сохранена")
-        except (pickle.PicklingError, TypeError) as e:
-            logger.error("Ошибка конфигурации: %s", e)
-        except OSError as e:
-            logger.error("Ошибка файловой системы при сохранении: %s", e)
+        except (json.decoder.JSONDecodeError, OSError) as e:
+            logger.error("Ошибка сохранения конфигурации: %s", e)
 
     def update_setting(self, key: str, value: str):
-        """Обновление настройки"""
+        """Обновляет настройку и сохраняет конфигурацию"""
+        if key == "timezone":
+            try:
+                ZoneInfo(value)  # Проверяем валидность часового пояса
+            except ZoneInfoNotFoundError:
+                logger.error("Неверный часовой пояс: %s", value)
+                return
         self.config[key] = value
         self.config["is_configured"] = all(
             [
