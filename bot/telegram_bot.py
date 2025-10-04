@@ -154,7 +154,7 @@ class TelegramSchoolNotifier:
         ]
         return [tz for tz in timezones if tz in available_timezones()]
 
-    def get_timezone_display_name(self, timezone: str) -> str:
+    def get_timezone_display_name(timezone: str) -> str:
         """Возвращает понятное название пояса для UI"""
         display_names = {
             "Europe/Kaliningrad": "Калининград \n(UTC+2)",
@@ -350,14 +350,12 @@ class TelegramSchoolNotifier:
 
         message_id = update.message.message_id
         text = update.message.text.strip()
-        logger.info("Обработка текстового ввода: %s", text)
 
         if context.user_data.get("awaiting_campus_selection"):
             logger.info("Обрабатываем выбор кампуса")
             await self.handle_campus_selection(update, context)
-            return
 
-        if context.user_data.get("awaiting_login"):
+        elif context.user_data.get("awaiting_login"):
             self.config_manager.update_setting("platform_login", text)
             await update.message.reply_text(
                 f"✅ Логин установлен: {text}",
@@ -375,6 +373,7 @@ class TelegramSchoolNotifier:
                 )
             else:
                 self.config_manager.update_setting("platform_password", text)
+                logger.info("Пароль установлен")
                 await update.message.reply_text(
                     "✅ Пароль установлен",
                     reply_markup=self.get_settings_keyboard(),
@@ -390,9 +389,12 @@ class TelegramSchoolNotifier:
                 except TelegramError as e:
                     logger.error("Ошибка удаления сообщения с паролем: %s", e)
 
-        if context.user_data.get("awaiting_timezone_selection"):
+        elif context.user_data.get("awaiting_timezone_selection"):
+            logger.info("Обработка ввода часового пояса")
             await self.handle_timezone_selection(update, context)
+
         else:
+            logger.info("Обработка текстового ввода: %s", text)
             await update.message.reply_text(
                 "Пожалуйста, используйте команды или выберите действие из меню.",
                 reply_markup=self.get_main_menu_keyboard(),
