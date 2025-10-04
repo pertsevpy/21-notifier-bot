@@ -16,6 +16,8 @@ class ConfigManager:
     def __init__(self, config_file: str = "bot_config.json"):
         self.config_file = config_file
         self.config = self.load_config()
+        # Загружаем пароль из переменной окружения
+        self.config["platform_password"] = os.getenv("PLATFORM_PASSWORD", "")
 
     def load_config(self) -> Dict:
         """Загружает конфигурацию из JSON файла"""
@@ -26,7 +28,6 @@ class ConfigManager:
                     # Валидация структуры конфига
                     required_keys = [
                         "platform_login",
-                        "platform_password",
                         "school_id",
                         "campus_name",
                         "admin_chat_id",
@@ -49,7 +50,6 @@ class ConfigManager:
         """Возвращает дефолтную конфигурацию"""
         return {
             "platform_login": "",
-            "platform_password": "",
             "school_id": "",
             "campus_name": "",
             "admin_chat_id": "",
@@ -62,8 +62,14 @@ class ConfigManager:
         """Сохраняет конфигурацию в JSON файл"""
         try:
             self.config["last_update"] = datetime.now().isoformat()
+            # Не сохраняем platform_password в файл
+            config_to_save = {
+                k: v
+                for k, v in self.config.items()
+                if k != "platform_password"
+            }
             with open(self.config_file, "w", encoding="utf-8") as f:
-                json.dump(self.config, f, indent=2, ensure_ascii=False)
+                json.dump(config_to_save, f, indent=2, ensure_ascii=False)
             logger.info("Конфигурация сохранена")
         except (json.decoder.JSONDecodeError, OSError) as e:
             logger.error("Ошибка сохранения конфигурации: %s", e)
@@ -76,11 +82,12 @@ class ConfigManager:
             except ZoneInfoNotFoundError:
                 logger.error("Неверный часовой пояс: %s", value)
                 return
+        if key == "platform_password":
+            os.environ["PLATFORM_PASSWORD"] = value
         self.config[key] = value
         self.config["is_configured"] = all(
             [
                 self.config["platform_login"],
-                self.config["platform_password"],
                 self.config["school_id"],
                 self.config["admin_chat_id"],
             ]
