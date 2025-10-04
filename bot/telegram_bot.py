@@ -154,7 +154,7 @@ class TelegramSchoolNotifier:
         ]
         return [tz for tz in timezones if tz in available_timezones()]
 
-    def get_timezone_display_name(timezone: str) -> str:
+    def get_timezone_display_name(self, timezone: str) -> str:
         """Возвращает понятное название пояса для UI"""
         display_names = {
             "Europe/Kaliningrad": "Калининград \n(UTC+2)",
@@ -443,7 +443,7 @@ class TelegramSchoolNotifier:
             )
             return
 
-        logger.info(f"Получено {len(campuses)} кампусов")
+        logger.info("Получено %d кампусов", len(campuses))
 
         context.user_data["campuses"] = campuses
         context.user_data["awaiting_campus_selection"] = True
@@ -467,7 +467,7 @@ class TelegramSchoolNotifier:
             )
             return
 
-        logger.info(f"Получено сообщение: {update.message.text}")
+        logger.info("Получено сообщение: %s", update.message.text)
 
         selected_campus_name = update.message.text
 
@@ -481,14 +481,16 @@ class TelegramSchoolNotifier:
             return
 
         campuses = context.user_data.get("campuses", [])
-        logger.info(f"Ищем кампус в списке из {len(campuses)} элементов")
+        logger.info("Ищем кампус в списке из %d элементов", len(campuses))
 
         selected_campus = None
 
         for campus in campuses:
             if campus["fullName"] == selected_campus_name:
                 selected_campus = campus
-                logger.info(f"Найдено точное совпадение: {campus['fullName']}")
+                logger.info(
+                    "Найдено точное совпадение: %s", campus["fullName"]
+                )
                 break
 
         if not selected_campus:
@@ -518,8 +520,9 @@ class TelegramSchoolNotifier:
             )
 
             logger.info(
-                f"Кампус сохранен: ID={selected_campus['id']}, "
-                f"Name={selected_campus['fullName']}"
+                "Кампус сохранен: ID=%s, Name=%s",
+                selected_campus["id"],
+                selected_campus["fullName"],
             )
 
             await update.message.reply_text(
@@ -530,7 +533,7 @@ class TelegramSchoolNotifier:
             )
             logger.info("Сообщение об успешном выборе кампуса отправлено")
         else:
-            logger.warning(f"Кампус не найден: '{selected_campus_name}'")
+            logger.warning("Кампус не найден: %s", selected_campus_name)
             await update.message.reply_text(
                 "❌ Кампус не найден. Пожалуйста, выберите из списка.",
                 reply_markup=self.get_campuses_keyboard(campuses),
@@ -618,7 +621,7 @@ class TelegramSchoolNotifier:
             "🔔 Проверка уведомлений: каждые 5 минут"
         )
 
-        logger.info(f"Мониторинг запущен для кампуса: {campus_name}")
+        logger.info("Мониторинг запущен для кампуса: %s", campus_name)
 
     async def stop_monitoring(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -761,7 +764,7 @@ class TelegramSchoolNotifier:
             else:
                 message = "❌ Ошибка ежедневной авторизации!"
                 logger.error(message)
-                return False
+            return False
 
         except Exception as e:
             logger.error("Критическая ошибка при авторизации: %s", e)
@@ -791,7 +794,7 @@ class TelegramSchoolNotifier:
 
             if new_notifications:
                 logger.info(
-                    f"Найдено {len(new_notifications)} новых уведомлений"
+                    "Найдено %d новых уведомлений", len(new_notifications)
                 )
 
                 for notification in new_notifications:
@@ -819,7 +822,7 @@ class TelegramSchoolNotifier:
                         parse_mode="MarkdownV2",
                     )
                     logger.info(
-                        f"Уведомление отправлено: {notification['id']}"
+                        "Уведомление отправлено: %s", notification["id"]
                     )
                 except Exception as markdown_error:
                     logger.warning(
@@ -851,8 +854,8 @@ class TelegramSchoolNotifier:
                             parse_mode=None,
                         )
                         logger.info(
-                            f"Уведомление отправлено без форматирования: "
-                            f"{notification['id']}"
+                            "Уведомление отправлено без форматирования: %s",
+                            notification["id"],
                         )
 
         except Exception as e:
