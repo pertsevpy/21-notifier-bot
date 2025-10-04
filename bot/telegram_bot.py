@@ -13,6 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -307,23 +308,6 @@ class TelegramSchoolNotifier:
         )
         context.user_data["awaiting_login"] = True
 
-    async def request_password(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ):
-        """Запрос пароля"""
-        chat_id = str(update.effective_chat.id)
-        if chat_id != self.config_manager.config["admin_chat_id"]:
-            await update.message.reply_text(
-                "⛔ У вас нет прав для управления этим ботом"
-            )
-            return
-
-        await update.message.reply_text(
-            "Введите ваш пароль от платформы 21-school:",
-            reply_markup=ReplyKeyboardRemove(),
-        )
-        context.user_data["awaiting_password"] = True
-
     async def back_to_main_menu(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ):
@@ -339,16 +323,34 @@ class TelegramSchoolNotifier:
             "Главное меню:", reply_markup=self.get_main_menu_keyboard()
         )
 
+    async def set_password(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        """Запрашивает ввод пароля"""
+        chat_id = str(update.effective_chat.id)
+        if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text("⛔ У вас нет прав")
+            return
+        await update.message.reply_text(
+            "🔑 Введите пароль для платформы 21-school:",
+            reply_markup=ReplyKeyboardMarkup(
+                [["🔙 Отмена"]], resize_keyboard=True
+            ),
+        )
+        context.user_data["awaiting_password_input"] = True
+
     async def handle_text_input(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ):
         """Обрабатывает текстовый ввод (логин, пароль, выбор кампуса)"""
         chat_id = str(update.effective_chat.id)
         if chat_id != self.config_manager.config["admin_chat_id"]:
+            await update.message.reply_text("⛔ У вас нет прав")
             return
 
-        text = update.message.text
-        logger.info(f"Обработка текстового ввода: '{text}'")
+        message_id = update.message.message_id
+        text = update.message.text.strip()
+        logger.info("Обработка текстового ввода: %s", text)
 
         if context.user_data.get("awaiting_campus_selection"):
             logger.info("Обрабатываем выбор кампуса")
@@ -364,14 +366,29 @@ class TelegramSchoolNotifier:
             context.user_data["awaiting_login"] = False
             logger.info("Логин установлен")
 
-        elif context.user_data.get("awaiting_password"):
-            self.config_manager.update_setting("platform_password", text)
-            await update.message.reply_text(
-                "✅ Пароль установлен",
-                reply_markup=self.get_settings_keyboard(),
-            )
-            context.user_data["awaiting_password"] = False
-            logger.info("Пароль установлен")
+        elif context.user_data.get("awaiting_password_input"):
+            if text == "🔙 Отмена":
+                context.user_data["awaiting_password_input"] = False
+                await update.message.reply_text(
+                    "Ввод пароля отменен",
+                    reply_markup=self.get_settings_keyboard(),
+                )
+            else:
+                self.config_manager.update_setting("platform_password", text)
+                await update.message.reply_text(
+                    "✅ Пароль установлен",
+                    reply_markup=self.get_settings_keyboard(),
+                )
+                context.user_data["awaiting_password_input"] = False
+                try:
+                    await self.application.bot.delete_message(
+                        chat_id=chat_id, message_id=message_id
+                    )
+                    logger.info(
+                        "Сообщение с паролем (ID: %s) удалено", message_id
+                    )
+                except TelegramError as e:
+                    logger.error("Ошибка удаления сообщения с паролем: %s", e)
 
         if context.user_data.get("awaiting_timezone_selection"):
             await self.handle_timezone_selection(update, context)
@@ -1040,7 +1057,7 @@ class TelegramSchoolNotifier:
                 self.application.add_handler(
                     MessageHandler(
                         filters.Regex("^🔑 Установить пароль$"),
-                        self.request_password,
+                        self.set_password,
                     )
                 )
                 self.application.add_handler(
