@@ -1,6 +1,6 @@
 """Заглушка для utils"""
 
-from bot.utils import clean_html, escape_markdown
+from bot.common.utils import clean_html, escape_markdown
 
 
 def test_clean_html():
