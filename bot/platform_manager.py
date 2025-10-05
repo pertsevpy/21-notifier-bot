@@ -84,8 +84,20 @@ class SchoolPlatformManager:
 
     def _setup_driver_manual(self, chrome_options):
         """Ручная настройка драйвера с поиском браузера"""
+        found_browser = self._find_browser_path()
+        if found_browser:
+            chrome_options.binary_location = found_browser
+            logger.info("Используем браузер: %s", found_browser)
+        else:
+            logger.warning("Браузер не найден, пробуем без указания пути...")
+
+        return self._create_driver_with_retry(chrome_options)
+
+    def _find_browser_path(self):
+        """Поиск пути к браузеру в системе"""
         import shutil
 
+        # Список возможных путей к браузерам
         possible_browsers = [
             "/usr/bin/google-chrome",
             "/usr/bin/google-chrome-stable",
@@ -98,37 +110,31 @@ class SchoolPlatformManager:
             "/var/lib/flatpak/exports/bin/com.google.Chrome",
         ]
 
-        found_browser = None
+        # Поиск по прямым путям
         for browser_path in possible_browsers:
             if os.path.exists(browser_path):
-                found_browser = browser_path
                 logger.info("Найден браузер: %s", browser_path)
-                break
+                return browser_path
 
-        if not found_browser:
-            for browser_cmd in [
-                "google-chrome",
-                "google-chrome-stable",
-                "chromium",
-                "chromium-browser",
-            ]:
-                try:
-                    browser_path = shutil.which(browser_cmd)
-                    if browser_path:
-                        found_browser = browser_path
-                        logger.info(
-                            "Найден браузер через which: %s", browser_path
-                        )
-                        break
-                except:
-                    continue
+        # Поиск через which
+        for browser_cmd in [
+            "google-chrome",
+            "google-chrome-stable",
+            "chromium",
+            "chromium-browser",
+        ]:
+            try:
+                browser_path = shutil.which(browser_cmd)
+                if browser_path:
+                    logger.info("Найден браузер через which: %s", browser_path)
+                    return browser_path
+            except Exception:
+                continue
 
-        if found_browser:
-            chrome_options.binary_location = found_browser
-            logger.info("Используем браузер: %s", found_browser)
-        else:
-            logger.warning("Браузер не найден, пробуем без указания пути...")
+        return None
 
+    def _create_driver_with_retry(self, chrome_options):
+        """Создание драйвера с обработкой ошибок"""
         try:
             service = Service(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -144,13 +150,47 @@ class SchoolPlatformManager:
         self, login: str = None, password: str = None
     ) -> Optional[str]:
         """Авторизация через API Keycloak"""
+        login, password = self._get_credentials(login, password)
+        if not login or not password:
+            return None
+
+        return self._perform_api_authentication(login, password)
+
+    def _get_credentials(self, login: str, password: str) -> tuple:
+        """Получение и валидация учетных данных"""
         login = login or self.config_manager.config["platform_login"]
         password = password or self.config_manager.config["platform_password"]
 
         if not login or not password:
             logger.error("Логин или пароль не установлены для API авторизации")
+            return None, None
+
+        return login, password
+
+    def _perform_api_authentication(
+        self, login: str, password: str
+    ) -> Optional[str]:
+        """Выполнение аутентификации через API"""
+        url, payload, headers = self._prepare_api_request(login, password)
+
+        try:
+            logger.info("Попытка авторизации через API...")
+            response = self.session.post(
+                url, headers=headers, data=payload, timeout=15
+            )
+            return self._handle_api_response(response)
+        except requests.exceptions.RequestException as e:
+            self._handle_request_exception(e)
+            return None
+        except json.JSONDecodeError as e:
+            logger.error("❌ Ошибка парсинга JSON ответа API: %s", e)
+            return None
+        except Exception as e:
+            logger.error("❌ Неожиданная ошибка при API авторизации: %s", e)
             return None
 
+    def _prepare_api_request(self, login: str, password: str) -> tuple:
+        """Подготовка запроса для API аутентификации"""
         url = "https://auth.21-school.ru/auth/realms/EduPowerKeycloak/protocol/openid-connect/token"
 
         payload = {
@@ -162,40 +202,39 @@ class SchoolPlatformManager:
 
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-        try:
-            logger.info("Попытка авторизации через API...")
-            response = self.session.post(
-                url, headers=headers, data=payload, timeout=15
-            )
-            response.raise_for_status()
+        return url, payload, headers
 
-            data = response.json()
-            access_token = data.get("access_token")
+    def _handle_api_response(self, response) -> Optional[str]:
+        """Обработка ответа от API"""
+        response.raise_for_status()
+        data = response.json()
+        access_token = data.get("access_token")
 
-            if access_token:
-                logger.info("✅ Токен успешно получен через API")
-                return access_token
-            else:
-                logger.error("❌ Токен не найден в ответе API")
-                return None
+        if access_token:
+            logger.info("✅ Токен успешно получен через API")
+            return access_token
+        else:
+            logger.error("❌ Токен не найден в ответе API")
+            return None
 
-        except requests.exceptions.RequestException as e:
-            logger.error("❌ Ошибка API авторизации: %s", e)
-            if hasattr(e, "response") and e.response is not None:
-                status_code = e.response.status_code
-                if status_code == 401:
-                    logger.error("Неверный логин или пароль")
-                elif status_code == 400:
-                    logger.error("Неверный запрос к API")
-                elif status_code >= 500:
-                    logger.error("Проблемы на сервере авторизации")
-            return None
-        except json.JSONDecodeError as e:
-            logger.error("❌ Ошибка парсинга JSON ответа API: %s", e)
-            return None
-        except Exception as e:
-            logger.error("❌ Неожиданная ошибка при API авторизации: %s", e)
-            return None
+    def _handle_request_exception(self, e: Exception):
+        """Обработка исключений при запросе"""
+        logger.error("❌ Ошибка API авторизации: %s", e)
+
+        if hasattr(e, "response") and e.response is not None:
+            self._handle_http_error(e.response.status_code)
+
+    def _handle_http_error(self, status_code: int):
+        """Обработка HTTP ошибок"""
+        error_messages = {
+            401: "Неверный логин или пароль",
+            400: "Неверный запрос к API",
+        }
+
+        if status_code in error_messages:
+            logger.error(error_messages[status_code])
+        elif status_code >= 500:
+            logger.error("Проблемы на сервере авторизации")
 
     def login_and_get_token(
         self, login: str = None, password: str = None
@@ -290,7 +329,13 @@ class SchoolPlatformManager:
         try:
             response = self.session.get(url, headers=headers, timeout=10)
             return response.status_code == 200
-        except:
+        except (
+            requests.exceptions.RequestException,
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+            requests.exceptions.HTTPError,
+        ) as e:
+            logger.debug("Ошибка при проверке токена: %s", e)
             return False
 
     def wait_for_token(self, driver, timeout: int = 30) -> Optional[str]:
@@ -350,7 +395,7 @@ class SchoolPlatformManager:
                 "authToken",
             ]
             return any(key in local_storage for key in token_keys)
-        except:
+        except:  # noqa: E722
             return False
 
     def _has_token_in_session_storage(self, driver) -> bool:
@@ -367,7 +412,7 @@ class SchoolPlatformManager:
                 "authToken",
             ]
             return any(key in session_storage for key in token_keys)
-        except:
+        except:  # noqa: E722
             return False
 
     def _has_token_in_cookies(self, driver) -> bool:
@@ -382,7 +427,7 @@ class SchoolPlatformManager:
                 "authToken",
             ]
             return any(cookie["name"] in token_names for cookie in cookies)
-        except:
+        except:  # noqa: E722
             return False
 
     def _is_dashboard_loaded(self, driver) -> bool:
@@ -411,11 +456,11 @@ class SchoolPlatformManager:
 
                     if elements:
                         return True
-                except:
+                except:  # noqa: E722
                     continue
 
             return False
-        except:
+        except:  # noqa: E722
             return False
 
     def _extract_token_from_local_storage(self, driver) -> Optional[str]:
@@ -751,7 +796,8 @@ class SchoolPlatformManager:
             if notifications:
                 last_notification = notifications[0]
                 logger.info(
-                    "Получено последнее уведомление: %s", last_notification["id"]
+                    "Получено последнее уведомление: %s",
+                    last_notification["id"],
                 )
                 return last_notification
             else:

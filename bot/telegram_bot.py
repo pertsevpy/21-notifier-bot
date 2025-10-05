@@ -6,7 +6,7 @@ import logging
 from contextlib import contextmanager
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List
+from typing import Dict, List, Optional
 from zoneinfo import available_timezones
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -179,6 +179,7 @@ class TelegramSchoolNotifier:
     def get_available_timezones_keyboard(self) -> ReplyKeyboardMarkup:
         """Клавиатура с доступными часовыми поясами России"""
         timezones = self.get_available_timezones()
+        # noqa: E203
         keyboard = [
             [self.get_timezone_display_name(tz) for tz in timezones[i : i + 2]]
             for i in range(0, len(timezones), 2)
@@ -460,86 +461,123 @@ class TelegramSchoolNotifier:
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ):
         """Обработка выбора кампуса"""
+        if not await self._check_admin_permissions(update):
+            return
+
+        selected_campus_name = update.message.text
+        logger.info("Получено сообщение: %s", selected_campus_name)
+
+        if await self._handle_back_button(
+            update, context, selected_campus_name
+        ):
+            return
+
+        campuses = context.user_data.get("campuses", [])
+        selected_campus = self._find_campus_by_name(
+            selected_campus_name, campuses
+        )
+
+        if selected_campus:
+            await self._handle_campus_found(update, context, selected_campus)
+        else:
+            await self._handle_campus_not_found(
+                update, context, selected_campus_name, campuses
+            )
+
+        context.user_data["awaiting_campus_selection"] = False
+
+    async def _check_admin_permissions(self, update: Update) -> bool:
+        """Проверка прав администратора"""
         chat_id = str(update.effective_chat.id)
         if chat_id != self.config_manager.config["admin_chat_id"]:
             await update.message.reply_text(
                 "⛔ У вас нет прав для управления этим ботом"
             )
-            return
+            return False
+        return True
 
-        logger.info("Получено сообщение: %s", update.message.text)
-
-        selected_campus_name = update.message.text
-
-        if selected_campus_name == "🔙 Назад к настройкам":
+    async def _handle_back_button(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        selected_text: str,
+    ) -> bool:
+        """Обработка кнопки 'Назад'"""
+        if selected_text == "🔙 Назад к настройкам":
             await update.message.reply_text(
                 "Возвращаюсь к настройкам:",
                 reply_markup=self.get_settings_keyboard(),
             )
             context.user_data["awaiting_campus_selection"] = False
             logger.info("Пользователь вернулся к настройкам")
-            return
+            return True
+        return False
 
-        campuses = context.user_data.get("campuses", [])
+    def _find_campus_by_name(
+        self, campus_name: str, campuses: List[Dict]
+    ) -> Optional[Dict]:
+        """Поиск кампуса по различным критериям"""
         logger.info("Ищем кампус в списке из %d элементов", len(campuses))
 
-        selected_campus = None
-
+        # Поиск по точному совпадению полного имени
         for campus in campuses:
-            if campus["fullName"] == selected_campus_name:
-                selected_campus = campus
+            if campus["fullName"] == campus_name:
                 logger.info(
                     "Найдено точное совпадение: %s", campus["fullName"]
                 )
-                break
+                return campus
 
-        if not selected_campus:
-            for campus in campuses:
-                if selected_campus_name in campus["fullName"]:
-                    selected_campus = campus
-                    logger.info(
-                        "Найдено частичное совпадение: %s", campus["fullName"]
-                    )
-                    break
+        # Поиск по частичному совпадению полного имени
+        for campus in campuses:
+            if campus_name in campus["fullName"]:
+                logger.info(
+                    "Найдено частичное совпадение: %s", campus["fullName"]
+                )
+                return campus
 
-        if not selected_campus:
-            for campus in campuses:
-                if selected_campus_name == campus["shortName"]:
-                    selected_campus = campus
-                    logger.info(
-                        "Найдено по shortName: %s", campus["shortName"]
-                    )
-                    break
+        # Поиск по короткому имени
+        for campus in campuses:
+            if campus_name == campus["shortName"]:
+                logger.info("Найдено по shortName: %s", campus["shortName"])
+                return campus
 
-        if selected_campus:
-            self.config_manager.update_setting(
-                "school_id", selected_campus["id"]
-            )
-            self.config_manager.update_setting(
-                "campus_name", selected_campus["fullName"]
-            )
+        logger.warning("Кампус не найден: %s", campus_name)
+        return None
 
-            logger.info(
-                "Кампус сохранен: ID=%s, Name=%s",
-                selected_campus["id"],
-                selected_campus["fullName"],
-            )
+    async def _handle_campus_found(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, campus: Dict
+    ):
+        """Обработка найденного кампуса"""
+        self.config_manager.update_setting("school_id", campus["id"])
+        self.config_manager.update_setting("campus_name", campus["fullName"])
 
-            await update.message.reply_text(
-                f"✅ Кампус выбран:\n\n"
-                f"🏫 {selected_campus['fullName']}\n"
-                f"🔗 ID: {selected_campus['id']}",
-                reply_markup=self.get_settings_keyboard(),
-            )
-            logger.info("Сообщение об успешном выборе кампуса отправлено")
-        else:
-            logger.warning("Кампус не найден: %s", selected_campus_name)
-            await update.message.reply_text(
-                "❌ Кампус не найден. Пожалуйста, выберите из списка.",
-                reply_markup=self.get_campuses_keyboard(campuses),
-            )
+        logger.info(
+            "Кампус сохранен: ID=%s, Name=%s",
+            campus["id"],
+            campus["fullName"],
+        )
 
-        context.user_data["awaiting_campus_selection"] = False
+        await update.message.reply_text(
+            f"✅ Кампус выбран:\n\n"
+            f"🏫 {campus['fullName']}\n"
+            f"🔗 ID: {campus['id']}",
+            reply_markup=self.get_settings_keyboard(),
+        )
+        logger.info("Сообщение об успешном выборе кампуса отправлено")
+
+    async def _handle_campus_not_found(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        campus_name: str,
+        campuses: List[Dict],
+    ):
+        """Обработка случая, когда кампус не найден"""
+        logger.warning("Кампус не найден: %s", campus_name)
+        await update.message.reply_text(
+            "❌ Кампус не найден. Пожалуйста, выберите из списка.",
+            reply_markup=self.get_campuses_keyboard(campuses),
+        )
 
     async def show_settings(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -730,7 +768,7 @@ class TelegramSchoolNotifier:
 
         status_text = "🟢 Запущен" if self.is_running else "🔴 Остановлен"
         is_complete, missing = self.config_manager.get_config_status()
-        config_status = "✅ Полная" if is_complete else f"❌ Неполная"
+        config_status = "✅ Полная" if is_complete else "❌ Неполная"
         campus_name = self.config_manager.config["campus_name"] or "Не выбран"
 
         stats_text = f"""
