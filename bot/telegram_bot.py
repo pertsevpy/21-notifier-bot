@@ -7,7 +7,6 @@ from contextlib import contextmanager
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional
-from zoneinfo import available_timezones
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -23,8 +22,9 @@ from telegram.ext import (
 )
 
 from bot.config_manager import ConfigManager
+from bot.keyboards import Keyboards
+from bot.message_formatters import MessageFormatters
 from bot.platform_manager import SchoolPlatformManager
-from bot.utils import convert_utc_to_local, clean_html, escape_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,7 @@ class TelegramSchoolNotifier:
         self.lock_file = lock_file
         self.config_manager = ConfigManager()
         self.platform_manager = SchoolPlatformManager(self.config_manager)
+        self.message_formatters = MessageFormatters(self.config_manager)
         self.scheduler = AsyncIOScheduler()
         self.application = None
         self.is_running = False
@@ -93,99 +94,27 @@ class TelegramSchoolNotifier:
 
     def get_main_menu_keyboard(self):
         """Клавиатура главного меню"""
-        keyboard = [
-            ["📊 Статус"],
-            ["▶️ Запуск", "⏹️ Остановка"],
-            ["🔐 Тест авторизации", "🔄 Сброс настроек"],
-            ["⚙️ Настройки", "🔔 Последнее уведомление"],
-        ]
-        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        return Keyboards.get_main_menu_keyboard()
 
     def get_settings_keyboard(self):
         """Клавиатура настроек"""
-        keyboard = [
-            ["👤 Установить логин", "🔑 Установить пароль"],
-            ["🏫 Выбрать кампус", "⏰ Часовой пояс"],
-            ["✅ Проверить настройки"],
-            ["🔙 Главное меню"],
-        ]
-        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        return Keyboards.get_settings_keyboard()
 
-    def get_campuses_keyboard(
-        self, campuses: List[Dict]
-    ) -> ReplyKeyboardMarkup:
+    def get_campuses_keyboard(self, campuses: List[Dict]):
         """Создает клавиатуру с кампусами"""
-        keyboard = []
-        current_row = []
-
-        for i, campus in enumerate(campuses):
-            campus_name = campus["fullName"]
-            if len(campus_name) > 30:
-                campus_name = campus_name[:27] + "..."
-
-            current_row.append(campus_name)
-
-            if len(current_row) >= 2 or i == len(campuses) - 1:
-                keyboard.append(current_row)
-                current_row = []
-
-        keyboard.append(["🔙 Назад к настройкам"])
-        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        return Keyboards.get_campuses_keyboard(campuses)
 
     def get_available_timezones(self) -> list[str]:
         """Возвращает список доступных часовых поясов России"""
-        timezones = [
-            "Europe/Kaliningrad",  # UTC+2
-            "Europe/Moscow",  # UTC+3
-            "Europe/Samara",  # UTC+4
-            "Asia/Tashkent",  # UTC+5
-            "Asia/Yekaterinburg",  # UTC+5
-            "Asia/Omsk",  # UTC+6
-            "Asia/Novosibirsk",  # UTC+7
-            "Asia/Novokuznetsk",  # UTC+7
-            "Asia/Krasnoyarsk",  # UTC+7
-            "Asia/Irkutsk",  # UTC+8
-            "Asia/Chita",  # UTC+9
-            "Asia/Vladivostok",  # UTC+10
-            "Asia/Magadan",  # UTC+11
-            "Asia/Sakhalin",  # UTC+11
-            "Asia/Kamchatka",  # UTC+12
-            "Asia/Anadyr",  # UTC+12
-        ]
-        return [tz for tz in timezones if tz in available_timezones()]
+        return Keyboards.get_available_timezones()
 
     def get_timezone_display_name(self, timezone: str) -> str:
         """Возвращает понятное название пояса для UI"""
-        display_names = {
-            "Europe/Kaliningrad": "Калининград \n(UTC+2)",
-            "Europe/Moscow": "Москва \n(UTC+3)",
-            "Europe/Samara": "Самара \n(UTC+4)",
-            "Asia/Tashkent": "Ташкент \n(UTC+5)",
-            "Asia/Yekaterinburg": "Екатеринбург \n(UTC+5)",
-            "Asia/Omsk": "Омск \n(UTC+6)",
-            "Asia/Novosibirsk": "Новосибирск \n(UTC+7)",
-            "Asia/Novokuznetsk": "Новокузнецк \n(UTC+7)",
-            "Asia/Krasnoyarsk": "Красноярск \n(UTC+7)",
-            "Asia/Irkutsk": "Иркутск \n(UTC+8)",
-            "Asia/Chita": "Чита \n(UTC+9)",
-            "Asia/Vladivostok": "Владивосток \n(UTC+10)",
-            "Asia/Magadan": "Магадан \n(UTC+11)",
-            "Asia/Sakhalin": "Сахалин \n(UTC+11)",
-            "Asia/Kamchatka": "Камчатка \n(UTC+12)",
-            "Asia/Anadyr": "Анадырь \n(UTC+12)",
-        }
-        return display_names.get(timezone, timezone)
+        return Keyboards.get_timezone_display_name(timezone)
 
-    def get_available_timezones_keyboard(self) -> ReplyKeyboardMarkup:
+    def get_available_timezones_keyboard(self):
         """Клавиатура с доступными часовыми поясами России"""
-        timezones = self.get_available_timezones()
-        # noqa: E203
-        keyboard = [
-            [self.get_timezone_display_name(tz) for tz in timezones[i : i + 2]]
-            for i in range(0, len(timezones), 2)
-        ]
-        keyboard.append(["🔙 Назад к настройкам"])
-        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        return Keyboards.get_available_timezones_keyboard()
 
     async def select_timezone(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -901,75 +830,18 @@ class TelegramSchoolNotifier:
             self.stats["errors"] += 1
 
     def format_notification_message(self, notification: Dict) -> str:
-        """Форматирование сообщения об уведомлении с правильным экранированием
-        и конвертацией времени"""
-        try:
-            timezone_str = self.config_manager.config.get(
-                "timezone", "Europe/Moscow"
-            )
-            time_str = convert_utc_to_local(
-                notification["time"], timezone_str
-            )  # Используем из utils
-            message_text = clean_html(notification["message"])
-
-            escaped_time = escape_markdown(time_str)
-            escaped_type = escape_markdown(
-                notification.get("groupName", "Неизвестно")
-            )
-            escaped_message = escape_markdown(message_text)
-            escaped_id = escape_markdown(notification["id"])
-
-            formatted_message = (
-                f"🔔 *Новое уведомление* 🔔\n"
-                f"📅 *Время:* {escaped_time}\n"
-                f"📋 *Тип:* {escaped_type}\n"
-                f"💬 *Сообщение:*\n"
-                f"{escaped_message}\n"
-                f"🆔 *ID:* `{escaped_id}`"
-            )
-
-            return formatted_message.strip()
-
-        except Exception as e:
-            return (
-                f"🔔 Новое уведомление\n\n"
-                f"{e}\n"
-                f"Время: {notification.get('time', 'Неизвестно')}\n"
-                f"Тип: {notification.get('groupName', 'Неизвестно')}\n\n"
-                f"Сообщение: {notification.get('message', '')}"
-            )
+        """Форматирование сообщения об уведомлении"""
+        return self.message_formatters.format_notification_message(
+            notification
+        )
 
     def format_notification_html(self, notification: Dict) -> str:
         """Форматирование сообщения в HTML"""
-        timezone_str = self.config_manager.config.get(
-            "timezone", "Europe/Moscow"
-        )
-        time_str = convert_utc_to_local(notification["time"], timezone_str)
-        message_text = clean_html(notification["message"])
-
-        return (
-            f"<b>🔔 Новое уведомление</b>\n"
-            f"<b>📅 Время:</b> {time_str}\n"
-            f"<b>📋 Тип:</b> {notification.get('groupName', 'Неизвестно')}\n"
-            f"<b>💬 Сообщение:</b>\n{message_text}\n"
-            f"<b>🆔 ID:</b> <code>{notification['id']}</code>"
-        )
+        return self.message_formatters.format_notification_html(notification)
 
     def format_notification_plain(self, notification: Dict) -> str:
         """Форматирование сообщения без разметки"""
-        timezone_str = self.config_manager.config.get(
-            "timezone", "Europe/Moscow"
-        )
-        time_str = convert_utc_to_local(notification["time"], timezone_str)
-        message_text = clean_html(notification["message"])
-
-        return (
-            f"🔔 Новое уведомление\n"
-            f"Время: {time_str}\n"
-            f"Тип: {notification.get('groupName', 'Неизвестно')}\n"
-            f"Сообщение:\n{message_text}\n"
-            f"ID: {notification['id']}"
-        )
+        return self.message_formatters.format_notification_plain(notification)
 
     async def last_notification_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
