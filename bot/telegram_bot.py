@@ -22,9 +22,9 @@ from telegram.ext import (
     ContextTypes,
 )
 
-from .config_manager import ConfigManager
-from .platform_manager import SchoolPlatformManager
-from .utils import convert_utc_to_local, clean_html, escape_markdown
+from bot.config_manager import ConfigManager
+from bot.platform_manager import SchoolPlatformManager
+from bot.utils import convert_utc_to_local, clean_html, escape_markdown
 
 logger = logging.getLogger(__name__)
 
