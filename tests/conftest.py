@@ -1,3 +1,5 @@
+"""автоматически настраивать pytest"""
+
 import sys
 import os
 
