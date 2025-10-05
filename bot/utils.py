@@ -3,7 +3,7 @@
 import logging
 import re
 from datetime import datetime
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ def convert_utc_to_local(utc_time_str: str, timezone_str: str) -> str:
     except ValueError as e:
         logger.error("Invalid time format: %s", e)
         return f"{utc_time_str.replace('T', ' ').replace('Z', ' UTC')} (error: {e})"
-    except ZoneInfo.InvalidTimeZone as e:
+    except ZoneInfoNotFoundError as e:
         logger.error("Invalid timezone: %s, falling back to UTC", e)
         try:
             utc_time = datetime.fromisoformat(
