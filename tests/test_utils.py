@@ -1,4 +1,10 @@
+<<<<<<< HEAD
 from bot.utils import clean_html, escape_markdown
+=======
+"""Заглушка для utils"""
+
+from bot.common.utils import clean_html, escape_markdown
+>>>>>>> cb264a7 (Working with Selenium is moved to file selenium_utils.py)
 
 
 def test_clean_html():
