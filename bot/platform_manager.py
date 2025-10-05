@@ -10,8 +10,8 @@ from typing import Dict, List, Optional
 import requests
 import requests.adapters
 
-from .config_manager import ConfigManager
-from .selenium_utils import SeleniumManager
+from bot.config_manager import ConfigManager
+from bot.selenium_utils import SeleniumManager
 
 logger: Logger = logging.getLogger(__name__)
 
