@@ -73,6 +73,16 @@ def test_convert_utc_to_local_edge_cases():
         == "05.10.2023 12:00 (UTC)"
     )
 
+    # Без дробной части
+    result = convert_utc_to_local("2025-10-07T15:00:11+00:00", "Europe/Moscow")
+    assert "error" not in result.lower()
+
+    # С большим количеством дробных знаков
+    result = convert_utc_to_local(
+        "2025-10-07T15:00:11.123456789+00:00", "Europe/Moscow"
+    )
+    assert "error" not in result.lower()
+
 
 def test_convert_utc_to_local_invalid():
     """Тест обработки невалидных данных"""
@@ -121,3 +131,30 @@ def test_convert_utc_to_local_leap_second():
     result = convert_utc_to_local("2023-06-30T23:59:60Z", "UTC")
     # Проверяем, что не возникает исключение и возвращается какой-то результат
     assert result is not None
+
+
+def test_convert_utc_to_local_with_milliseconds():
+    """Тест преобразования времени с миллисекундами"""
+    # Формат с 2 знаками миллисекунд
+    result = convert_utc_to_local(
+        "2025-10-07T15:00:11.99+00:00", "Europe/Moscow"
+    )
+    assert "error" not in result.lower()
+
+    # Формат с 3 знаками миллисекунд
+    result = convert_utc_to_local(
+        "2025-10-07T15:00:11.999+00:00", "Europe/Moscow"
+    )
+    assert "error" not in result.lower()
+
+    # Формат с микросекундами
+    result = convert_utc_to_local(
+        "2025-10-07T15:00:11.999999+00:00", "Europe/Moscow"
+    )
+    assert "error" not in result.lower()
+
+
+def test_convert_utc_to_local_with_z_suffix():
+    """Тест преобразования времени с Z окончанием"""
+    result = convert_utc_to_local("2025-10-07T15:00:11.99Z", "Europe/Moscow")
+    assert "error" not in result.lower()
