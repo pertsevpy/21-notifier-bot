@@ -3,6 +3,7 @@
 import logging
 import re
 from datetime import datetime
+from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -43,22 +44,73 @@ def convert_utc_to_local(utc_time_str: str, timezone_str: str) -> str:
         timezone_str = default_tz
 
     try:
-        utc_time = datetime.fromisoformat(utc_time_str.replace("Z", "+00:00"))
+        # Нормализуем строку времени - обрабатываем разные форматы
+        normalized_time = _normalize_time_string(utc_time_str)
+
+        # Парсим нормализованное время
+        utc_time = datetime.fromisoformat(normalized_time)
         local_tz = ZoneInfo(timezone_str)
         local_time = utc_time.astimezone(local_tz)
         return local_time.strftime("%d.%m.%Y %H:%M (%Z)")
     except ValueError as e:
-        logger.error("Invalid time format: %s", e)
-        return f"{utc_time_str.replace('T', ' ').replace('Z', ' UTC')} (error: {e})"
+        logger.error("Invalid time format '%s': %s", utc_time_str, e)
+        # Пытаемся извлечь базовую информацию даже при ошибке
+        return _fallback_time_format(utc_time_str, e)
     except ZoneInfoNotFoundError as e:
         logger.error("Invalid timezone: %s, falling back to UTC", e)
         try:
-            utc_time = datetime.fromisoformat(
-                utc_time_str.replace("Z", "+00:00")
-            )
+            normalized_time = _normalize_time_string(utc_time_str)
+            utc_time = datetime.fromisoformat(normalized_time)
             local_tz = ZoneInfo(default_tz)
             local_time = utc_time.astimezone(local_tz)
             return local_time.strftime("%d.%m.%Y %H:%M (%Z)")
         except ValueError as ve:
             logger.error("Failed to convert to UTC: %s", ve)
-            return f"{utc_time_str.replace('T', ' ').replace('Z', ' UTC')} (error: {ve})"
+            return _fallback_time_format(utc_time_str, ve)
+
+
+def _normalize_time_string(time_str: str) -> str:
+    """Нормализует строку времени для корректного парсинга"""
+    # Убираем пробелы
+    time_str = time_str.strip()
+
+    # Заменяем Z на +00:00 для стандартизации
+    if time_str.endswith("Z"):
+        time_str = time_str[:-1] + "+00:00"
+
+    # Обрабатываем миллисекунды/микросекунды
+    if "." in time_str and "+" in time_str:
+        # Разделяем на основную часть и часовой пояс
+        main_part, tz_part = time_str.split("+", 1)
+        tz_part = "+" + tz_part
+
+        # Обрабатываем дробную часть секунд
+        if "." in main_part:
+            date_part, time_part = main_part.split("T", 1)
+            if "." in time_part:
+                time_without_fraction, fraction = time_part.split(".", 1)
+                # Оставляем только 6 знаков для микросекунд (или меньше если нужно)
+                if len(fraction) > 6:
+                    fraction = fraction[:6]
+                elif len(fraction) < 6:
+                    fraction = fraction.ljust(6, "0")
+                time_part = time_without_fraction + "." + fraction
+
+            main_part = date_part + "T" + time_part
+
+        return main_part + tz_part
+
+    return time_str
+
+
+def _fallback_time_format(time_str: str, error: Exception) -> str:
+    """Форматирование времени при ошибках парсинга"""
+    try:
+        # Пытаемся извлечь базовую информацию
+        clean_time = time_str.replace("T", " ").replace("Z", " UTC")
+        # Убираем дробную часть для читаемости
+        if "." in clean_time:
+            clean_time = clean_time.split(".")[0] + " UTC"
+        return f"{clean_time}"
+    except Exception as e:
+        return f"{time_str} ({error}) (parse error: {e})"
