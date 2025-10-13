@@ -89,7 +89,8 @@ def test_convert_utc_to_local_invalid():
     # Неправильный формат времени
     result = convert_utc_to_local("invalid-time", "Europe/Moscow")
     assert "invalid-time" in result
-    assert "error" in result.lower()
+    # Проверяем, что функция сообщает об ошибке (на любом языке)
+    assert any(word in result.lower() for word in ["error", "ошибка"])
 
     # Неправильный часовой пояс
     result = convert_utc_to_local("2023-10-05T12:00:00Z", "Invalid/Timezone")

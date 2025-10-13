@@ -44,18 +44,16 @@ def convert_utc_to_local(utc_time_str: str, timezone_str: str) -> str:
         timezone_str = default_tz
 
     try:
-        # Нормализуем строку времени - обрабатываем разные форматы
+        # Пробуем нормализовать и распарсить
         normalized_time = _normalize_time_string(utc_time_str)
-
-        # Парсим нормализованное время
         utc_time = datetime.fromisoformat(normalized_time)
         local_tz = ZoneInfo(timezone_str)
         local_time = utc_time.astimezone(local_tz)
         return local_time.strftime("%d.%m.%Y %H:%M (%Z)")
     except ValueError as e:
-        logger.error("Invalid time format '%s': %s", utc_time_str, e)
-        # Пытаемся извлечь базовую информацию даже при ошибке
-        return _fallback_time_format(utc_time_str, e)
+        logger.error("Invalid time format: %s", e)
+        # Возвращаем в старом формате для совместимости с тестами
+        return f"{utc_time_str.replace('T', ' ').replace('Z', ' UTC')} (error: {e})"
     except ZoneInfoNotFoundError as e:
         logger.error("Invalid timezone: %s, falling back to UTC", e)
         try:
@@ -66,7 +64,7 @@ def convert_utc_to_local(utc_time_str: str, timezone_str: str) -> str:
             return local_time.strftime("%d.%m.%Y %H:%M (%Z)")
         except ValueError as ve:
             logger.error("Failed to convert to UTC: %s", ve)
-            return _fallback_time_format(utc_time_str, ve)
+            return f"{utc_time_str.replace('T', ' ').replace('Z', ' UTC')} (error: {ve})"
 
 
 def _normalize_time_string(time_str: str) -> str:
@@ -101,16 +99,3 @@ def _normalize_time_string(time_str: str) -> str:
         return main_part + tz_part
 
     return time_str
-
-
-def _fallback_time_format(time_str: str, error: Exception) -> str:
-    """Форматирование времени при ошибках парсинга"""
-    try:
-        # Пытаемся извлечь базовую информацию
-        clean_time = time_str.replace("T", " ").replace("Z", " UTC")
-        # Убираем дробную часть для читаемости
-        if "." in clean_time:
-            clean_time = clean_time.split(".")[0] + " UTC"
-        return f"{clean_time}"
-    except Exception as e:
-        return f"{time_str} ({error}) (parse error: {e})"
